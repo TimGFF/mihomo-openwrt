@@ -1,17 +1,17 @@
 # ============================================================
-#  Mihomo config: VLESS Reality — прозрачный VPN для OpenWrt
-#  Инструкция: https://github.com/TimGFF/mihomo-openwrt
+#  Nikki (Mihomo) profile: прозрачный VPN для OpenWrt
+#  Репозиторий: https://github.com/TimGFF/mihomo-openwrt
 # ============================================================
 #
 #  ДВА ВАРИАНТА НАСТРОЙКИ — выбери один:
 #
 #  ВАРИАНТ A: Подписка (автообновление прокси)
-#    — раскомментируй секцию "proxy-providers" ниже (~строки 110-130)
-#    — закомментируй/удали секцию "proxies" (~строки 135-155)
+#    — раскомментируй секцию "proxy-providers" ниже (~строки 115-135)
+#    — закомментируй/удали секцию "proxies" (~строки 140-160)
 #    — замени YOUR_SUBSCRIPTION_URL на твой URL
 #
 #  ВАРИАНТ Б: Ручная VLESS-ссылка (без подписки)
-#    — заполни server, uuid, servername, public-key, short-id (~строки 138-152)
+#    — заполни server, uuid, servername, public-key, short-id (~строки 143-157)
 #    — это активный вариант по умолчанию
 #
 # ============================================================
@@ -33,20 +33,21 @@ external-controller: 0.0.0.0:9090
 external-ui: /etc/mihomo/ui
 secret: ""
 
-# TUN — перехватывает весь трафик
+# TUN — перехватывает UDP трафик
+# Примечание: routing управляется nikki через nftables, не mihomo
 tun:
   enable: true
-  stack: gvisor              # gvisor: надёжный перехват DNS
+  stack: gvisor              # gvisor: надёжный перехват DNS (mixed ломает DNS hijack — баг #1258)
   device: Meta
   dns-hijack:
     - "any:53"
     - "tcp://any:53"
-  auto-route: true
-  auto-redirect: false       # Отключено — redirect настраивается через nftables в init-скрипте
-  auto-detect-interface: true
+  auto-route: false          # nikki управляет routing через nftables
+  auto-redirect: false
+  auto-detect-interface: false
   strict-route: false        # false обязателен на роутере (иначе блокирует LAN)
   mtu: 1500
-  route-exclude-address:     # Исключить LAN и private из TUN (предотвращает routing loop)
+  route-exclude-address:     # Исключить LAN и private из TUN
     - "192.168.0.0/16"
     - "10.0.0.0/8"
     - "172.16.0.0/12"
@@ -83,14 +84,14 @@ dns:
     # Windows — иначе пишет "Нет интернета"
     - "+.msftncsi.com"
     - "+.msftconnecttest.com"
-    # iOS captive portal — ОБЯЗАТЕЛЬНО реальный IP, иначе iOS считает что нет интернета
+    # iOS captive portal — ОБЯЗАТЕЛЬНО реальный IP, иначе iOS видит "нет интернета"
     - "captive.apple.com"
     - "+.captive.apple.com"
     # Android captive portal detection
     - "connectivitycheck.gstatic.com"
     - "clients3.google.com"
     # VPN сервер — ОБЯЗАТЕЛЬНО реальный IP (иначе routing loop!)
-    - "YOUR_SERVER"          # ← замени на адрес твоего VPN сервера
+    - "YOUR_SERVER"          # ← замени на домен/адрес твоего VPN сервера
 
   # Bootstrap DNS: только plain IP
   default-nameserver:
@@ -99,11 +100,6 @@ dns:
   nameserver:
     - https://dns.google/dns-query
     - https://dns.cloudflare.com/dns-query
-  fallback:
-    - tls://1.1.1.1:853
-  fallback-filter:
-    geoip: true
-    geoip-code: RU
 
 # ============================================================
 #  ВАРИАНТ A: Подписка (proxy-providers)
@@ -117,8 +113,6 @@ dns:
 #     interval: 3600                   # обновление каждый час
 #     proxy: DIRECT                    # скачивать подписку напрямую
 #     path: ./proxies/subscription.yaml
-#     override:
-#       interface-name: AUTO           # init-скрипт подставит реальный WAN автоматически
 #     health-check:
 #       enable: true
 #       url: "http://www.gstatic.com/generate_204"
@@ -154,7 +148,7 @@ proxies:
       public-key: YOUR_PUBLIC_KEY  # ← pbk= из ссылки
       short-id: YOUR_SHORT_ID      # ← sid= из ссылки
     client-fingerprint: random
-    interface-name: AUTO    # ← не трогай! init-скрипт подставляет WAN-интерфейс автоматически
+    # interface-name не нужен — nikki изолирует mihomo через cgroup (нет routing loop)
 
 proxy-groups:
   - name: "PROXY"

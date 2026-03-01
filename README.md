@@ -1,8 +1,8 @@
-# Mihomo VPN на роутере OpenWrt
+# Прозрачный VPN на роутере OpenWrt + Nikki (Mihomo)
 
-**Прозрачный VPN для всех устройств в сети** — YouTube, Instagram, TikTok работают автоматически на телефоне, ТВ, ноутбуке и всём остальном. Российские сайты (VK, Яндекс, RuTube) открываются напрямую без VPN.
+**YouTube, Instagram, TikTok работают автоматически** на всех устройствах в сети. Российские сайты (VK, Яндекс, RuTube) открываются напрямую без VPN.
 
-Настраивается **один раз** через скрипт на Windows. Перезагружать роутер после этого не нужно.
+Настраивается через скрипт на Windows. Перезагружать роутер после этого не нужно.
 
 ---
 
@@ -11,61 +11,67 @@
 ```
   Телефон / ТВ / ПК
          |
-      [Роутер OpenWrt]
-         |                  |
+      [Роутер OpenWrt + Nikki]
+         |                         |
     youtube.com  →→→  [VPN сервер]  →→→  YouTube
     vk.com       →→→  Напрямую (без VPN)
 ```
 
-Mihomo — это программа на роутере, которая:
-1. Перехватывает весь трафик из твоей сети
-2. Смотрит куда идёт соединение
-3. Российские сайты пускает напрямую, остальные — через VPN
-4. Устройства в сети даже не знают что есть VPN — он прозрачный
+**Nikki** (luci-app-nikki) — LuCI-пакет для управления [Mihomo](https://github.com/MetaCubeX/mihomo) на роутере. Он настраивает nftables, routing, TUN-интерфейс и автозапуск. Mihomo перехватывает трафик, смотрит куда идёт соединение, и выбирает маршрут по правилам.
 
 ---
 
 ## Что нужно
 
-### Оборудование
-- **Роутер на OpenWrt** (прошивка должна быть уже установлена)
-  - Протестировано: Xiaomi AX3000T
-  - Работает на: любой OpenWrt 22+ с архитектурой aarch64, armv7, x86_64, mips
-- **Компьютер на Windows 10 или 11**
+### Роутер
+- **OpenWrt 24.x** с установленным **luci-app-nikki**
+- Протестировано: Xiaomi AX3000T (aarch64_cortex-a53)
+- Минимум 128 МБ RAM, 32 МБ Flash
+
+### Компьютер
+- **Windows 10 или 11** (встроенный SSH)
 
 ### VPN
-- **VLESS Reality сервер** или подписка с vless:// ссылкой
-  - Если у тебя нет сервера — его можно арендовать или поднять самому (3x-ui, XKeen, Marzban)
-  - Подписки продаются у многих провайдеров VPN
-
-### Программы
-- **Git** — для скачивания этого репозитория
-  Скачать: https://git-scm.com/download/win
-- **OpenSSH** — уже встроен в Windows 10/11
-  Проверить: открой PowerShell и введи `ssh -V`
+Один из двух вариантов:
+- **VLESS Reality сервер** (ссылка вида `vless://UUID@HOST:PORT?pbk=...`)
+- **Подписка** в mihomo/clash формате (URL с прокси-листом)
 
 ---
 
 ## Установка — 3 шага
 
-### Шаг 1: Скачай репозиторий
+### Шаг 0: Установи luci-app-nikki на роутере
 
-Открой **PowerShell** или **cmd** и выполни:
+Подключись к роутеру по SSH и выполни:
 
-```powershell
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+```sh
+opkg update && opkg install luci-app-nikki
 ```
 
-Или нажми кнопку **"Code → Download ZIP"** на этой странице и распакуй.
+Или через LuCI: **System → Software → Search** → `luci-app-nikki` → Install.
+
+> После установки nikki появится в LuCI: **Services → Nikki**
+
+---
+
+### Шаг 1: Скачай репозиторий
+
+```powershell
+git clone https://github.com/TimGFF/mihomo-openwrt.git
+cd mihomo-openwrt
+```
+
+Или нажми **Code → Download ZIP** и распакуй.
 
 ---
 
 ### Шаг 2: Заполни данные VPN
 
-Открой файл **`mihomo/config.yaml`** в любом текстовом редакторе (Блокнот, VS Code, Notepad++).
+Открой **`mihomo/config.yaml`** в любом редакторе.
 
-Найди раздел с прокси (строки ~95-110) и заполни поля:
+#### Вариант Б: Ручная VLESS-ссылка (активен по умолчанию)
+
+Найди раздел `proxies:` и заполни поля:
 
 ```yaml
 proxies:
@@ -74,77 +80,62 @@ proxies:
     server: YOUR_SERVER          # ← адрес VPN сервера
     port: 443
     uuid: YOUR_UUID              # ← UUID
-    network: tcp
-    tls: true
-    udp: true
-    servername: YOUR_SNI         # ← SNI
+    servername: YOUR_SNI         # ← sni= из ссылки
     reality-opts:
-      public-key: YOUR_PUBLIC_KEY  # ← публичный ключ
-      short-id: YOUR_SHORT_ID      # ← short-id
-    client-fingerprint: random
+      public-key: YOUR_PUBLIC_KEY  # ← pbk= из ссылки
+      short-id: YOUR_SHORT_ID      # ← sid= из ссылки
 ```
 
-#### Как получить параметры из vless:// ссылки
-
-Если у тебя есть ссылка вида:
+**Как разобрать vless:// ссылку:**
 ```
-vless://66dc8983-dcb6-42a8-9ab0-410ecd5d378e@vpn.example.com:443?pbk=XXGfXLEizI0s&sid=42aafa32&sni=sni.example.com&...
+vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
 ```
 
-Разбираем её:
-
-| Что куда | Пример |
+| Параметр | Откуда |
 |----------|--------|
-| `server:` | адрес после `@` → `vpn.example.com` |
-| `port:` | порт после `:` → `443` |
-| `uuid:` | строка до `@` → `66dc8983-dcb6-42a8-9ab0-410ecd5d378e` |
-| `servername:` | параметр `sni=` → `sni.example.com` |
-| `public-key:` | параметр `pbk=` → `XXGfXLEizI0s...` |
-| `short-id:` | параметр `sid=` → `42aafa32` |
+| `server` | адрес после `@` |
+| `port` | порт после `:` |
+| `uuid` | строка до `@` |
+| `servername` | параметр `sni=` |
+| `public-key` | параметр `pbk=` |
+| `short-id` | параметр `sid=` |
 
-> **Важно:** НЕ добавляй `flow: xtls-rprx-vision` если его нет в твоей ссылке.
-> Если ссылка содержит `flow=xtls-rprx-vision` — тогда добавь эту строку в конфиг.
+**Также замени** `YOUR_SERVER` в двух других местах:
+- В `fake-ip-filter` (~строка 88): `- "YOUR_SERVER"`
+- В `rules` (~строка 165): `- DOMAIN,YOUR_SERVER,DIRECT`
 
-**Также замени** в конфиге:
-```yaml
-    - "YOUR_SERVER"   # ← в разделе fake-ip-filter (строка ~78)
-```
-```yaml
-  - DOMAIN,YOUR_SERVER,DIRECT   # ← в разделе rules (строка ~117)
-```
-На реальный адрес своего VPN сервера.
+#### Вариант А: Подписка
+
+Раскомментируй секцию `proxy-providers` в конфиге и замени `YOUR_SUBSCRIPTION_URL` на твой URL. Закомментируй или удали секцию `proxies`.
 
 ---
 
 ### Шаг 3: Запусти установку
 
-**Убедись:**
-- Компьютер подключён к роутеру (по кабелю или WiFi)
-- Роутер имеет выход в интернет (нужен для скачивания компонентов)
-
-**Запусти скрипт:**
-
-Нажми правой кнопкой мыши на файл **`deploy.ps1`** → **"Запустить с помощью PowerShell"**
+Нажми правой кнопкой на **`deploy.ps1`** → **"Запустить с помощью PowerShell"**
 
 Или в PowerShell:
 ```powershell
 .\deploy.ps1
 ```
 
-Скрипт спросит IP роутера (по умолчанию `192.168.1.1`) и сделает всё сам:
+Скрипт:
+1. Подключается к роутеру по SSH
+2. Загружает профиль в `/etc/nikki/profiles/main.yaml`
+3. Настраивает UCI nikki, dnsmasq, MSS clamping
+4. Запускает nikki и проверяет статус
 
 ```
-[1/5] Проверка подключения к роутеру...
-[2/5] Проверка конфигурации VPN...
-[3/5] Установка Mihomo (2-5 минут)...
-      Скачивает: mihomo бинарник, GeoIP, GeoSite, веб-панель
-[4/5] Загрузка конфигурации VPN...
-[5/5] Запуск Mihomo...
-      VPN alive: TRUE ✓
-УСТАНОВКА ЗАВЕРШЕНА!
+[1/4] Проверка подключения...  OK
+[2/4] Проверка профиля...      OK
+[3/4] Загрузка профиля...      OK
+[4/4] Настройка и запуск...    OK
+
+  VPN alive: TRUE ✓
+  Веб-панель: http://192.168.1.1:9090/ui
 ```
 
-> **Если PowerShell не запускает скрипт:** открой PowerShell от имени администратора и выполни:
+> **Если PowerShell блокирует скрипт:**
 > ```powershell
 > Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
@@ -153,8 +144,6 @@ vless://66dc8983-dcb6-42a8-9ab0-410ecd5d378e@vpn.example.com:443?pbk=XXGfXLEizI0
 
 ## Проверка
 
-После установки:
-
 1. Подключись к WiFi роутера
 2. Открой **YouTube** → должен работать
 3. Открой **ВКонтакте** → должен работать
@@ -162,81 +151,53 @@ vless://66dc8983-dcb6-42a8-9ab0-410ecd5d378e@vpn.example.com:443?pbk=XXGfXLEizI0
 
 ---
 
-## Веб-панель управления
+## Веб-панель
 
-Открой в браузере: **http://192.168.1.1:9090/ui**
+**http://192.168.1.1:9090/ui** — MetaCubeXD
 
-Здесь можно видеть:
-- Какие сайты открываются через VPN, какие напрямую
-- Скорость соединений
-- Статус VPN (alive: true = работает)
-
-> **Важно:** Не меняй режим в веб-панели. Должен стоять **"Правила"** (Rules).
-> Любые изменения в веб-панели не сохраняются — при перезапуске сбросятся.
-
----
-
-## Обновление конфигурации VPN
-
-Если VPN перестал работать (статус `alive: false`) — скорее всего изменился `short-id` на сервере.
-
-**Быстрое обновление:**
-
-1. Скачай свежую подписку и декодируй:
-   ```powershell
-   # В PowerShell:
-   $b64 = (Invoke-WebRequest "https://ТВОЯ_ССЫЛКА_ПОДПИСКИ").Content
-   [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
-   ```
-
-   Или на роутере:
-   ```sh
-   wget -q -O - "https://ТВОЯ_ССЫЛКА_ПОДПИСКИ" | base64 -d
-   ```
-
-2. Найди параметр `sid=` в выводе — это новый `short-id`
-
-3. Обнови `mihomo/config.yaml`:
-   ```yaml
-   short-id: НОВЫЙ_SHORT_ID
-   ```
-
-4. Загрузи новый конфиг:
-   ```powershell
-   .\deploy.ps1
-   ```
-   Или только загрузи конфиг (без переустановки):
-   ```powershell
-   # В PowerShell:
-   Get-Content .\mihomo\config.yaml | ssh root@192.168.1.1 "cat > /etc/mihomo/config.yaml && service mihomo restart"
-   ```
+- Вкладка **Proxies**: статус VPN (alive: true = работает)
+- Вкладка **Connections**: текущие соединения и их маршрут
+- Вкладка **Logs**: логи в реальном времени
 
 ---
 
 ## Управление через SSH
 
-Подключись к роутеру:
 ```sh
 ssh root@192.168.1.1
-```
 
-Полезные команды:
-
-```sh
-# Статус сервиса
-service mihomo status
+# Статус
+service nikki status
 
 # Перезапуск
-service mihomo restart
+service nikki restart
 
-# Логи в реальном времени
-logread -f | grep mihomo
+# Логи nikki (app)
+cat /var/log/nikki/app.log
 
-# Проверить статус VPN (alive: true = работает)
-wget -q -O - http://localhost:9090/proxies/ 2>/dev/null
+# Логи mihomo (core — соединения, правила)
+cat /var/log/nikki/core.log
 
-# Посмотреть активные соединения
-wget -q -O - http://localhost:9090/connections 2>/dev/null | head -500
+# Статус VPN через API
+curl -s http://127.0.0.1:9090/providers/proxies | grep '"alive"'
+```
+
+---
+
+## Обновление профиля
+
+Если VPN перестал работать (`alive: false`) — возможно изменился `short-id` на сервере.
+
+1. Обнови `short-id` в `mihomo/config.yaml`
+2. Перезапусти deploy.ps1
+
+Или вручную на роутере:
+```sh
+ssh root@192.168.1.1
+# Отредактируй профиль
+vi /etc/nikki/profiles/main.yaml
+# Перезапусти nikki
+service nikki restart
 ```
 
 ---
@@ -244,107 +205,135 @@ wget -q -O - http://localhost:9090/connections 2>/dev/null | head -500
 ## Частые проблемы
 
 ### VPN alive: false
-Сервер отклоняет подключение. Проверь:
-- `server`, `uuid`, `public-key`, `short-id` скопированы правильно без пробелов
-- `short-id` не устарел (сервер мог его сменить — скачай свежую подписку)
-- Не добавил лишнюю строку `flow:` если её нет в ссылке
+- `server`, `uuid`, `public-key`, `short-id` скопированы точно, без пробелов?
+- `short-id` актуален? (сервер мог его сменить — скачай свежую подписку)
+- Нет лишней строки `flow:` если её не было в ссылке?
 
-### iPhone/iPad пишет "Нет подключения к интернету" при подключении к WiFi
-Это нормально — iOS проверяет интернет через `captive.apple.com`.
-Эта ошибка уже исправлена в конфиге (captive.apple.com идёт напрямую).
-Если ошибка всё равно есть — перезапусти mihomo: `service mihomo restart`
+### iPhone/Android пишет "Нет интернета" при подключении к WiFi
+Профиль уже содержит правила для captive portal (`captive.apple.com`, `connectivitycheck.gstatic.com`). Это нормально при первом подключении. Если ошибка постоянная — `service nikki restart`.
 
-### YouTube не работает, хотя VPN alive: true
-Иногда нужно подождать 30-60 секунд после запуска mihomo.
-Принудительно сбрось DNS кэш на телефоне: выключи и включи WiFi.
-
-### PowerShell говорит "cannot be loaded because running scripts is disabled"
-```powershell
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-### Скрипт не может подключиться к роутеру
-- Убедись что ты в одной сети с роутером
-- Проверь IP: `ping 192.168.1.1`
-- На OpenWrt: **System → Administration → SSH Access** — должен быть включён
-
-### Mihomo не запускается после перезагрузки роутера
-Зайди по SSH и запусти вручную:
+### Не открываются некоторые сайты (HTTPS)
+MSS clamping настраивается автоматически скриптом. Если проблема осталась:
 ```sh
-service mihomo start
-logread | grep mihomo | tail -20
+nft list table inet mss_clamp
 ```
+Должна быть таблица с правилом `tcp option maxseg size set 1452`.
+
+### Российские сайты (.ru) идут через VPN
+Проверь что GeoSite базы загружены:
+```sh
+ls -lh /etc/mihomo/geosite.dat
+```
+Если файла нет — скачай вручную:
+```sh
+wget -O /etc/mihomo/geosite.dat \
+  https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat
+service nikki restart
+```
+
+### Nikki не запускается / статус "stopped"
+```sh
+cat /var/log/nikki/app.log
+cat /var/log/nikki/core.log
+```
+
+### SSH не подключается
+- Убедись что в одной сети с роутером
+- Проверь: `ping 192.168.1.1`
+- На OpenWrt: **System → Administration → SSH Access** — должен быть включён
 
 ---
 
 ## Технические детали
 
-### Архитектура работы
+### Архитектура
 
 ```
 LAN устройство (телефон)
-    ↓ TCP/UDP пакет
-[dnsmasq] → запрос DNS → [Mihomo DNS :1053]
-    ← fake IP (198.18.x.x)
-    ↓ TCP к 198.18.x.x
+    │
+    ↓ DNS запрос → порт 53
+[dnsmasq] → форвард → [Mihomo DNS :1053]
+    ← fake-IP (198.18.x.x)
+    │
+    ↓ TCP соединение к fake-IP
 [nftables PREROUTING] → redirect → [Mihomo redir-port :7891]
-    ↓ SO_ORIGINAL_DST → знает реальный домен
-[Правила Mihomo]
+    │
+[Mihomo правила]
     ├─ GEOSITE tld-ru / category-ru → DIRECT (Яндекс, VK, RuTube)
     ├─ GEOIP RU → DIRECT (российские IP)
     └─ MATCH → PROXY → [VLESS Reality туннель] → интернет
+    │
+    ↓ UDP соединение (DNS, QUIC, и т.д.)
+[nftables fwmark 0x81] → ip rule → table 81 → default via Meta (TUN)
+    │
+[Mihomo TUN :gvisor] → правила → PROXY / DIRECT
 ```
 
-### Почему такая схема
+### Почему именно так
 
-- **fake-ip режим** — роутер возвращает фиктивные IP для всех доменов. Реальное разрешение DNS происходит внутри mihomo. Это позволяет перехватить весь трафик на уровне сокета.
-- **nftables PREROUTING redirect** — перенаправляет TCP пакеты от LAN устройств на mihomo redir-port. Это нужно потому что Firewall на OpenWrt не пропускает трафик через Meta TUN из FORWARD цепочки.
-- **gVisor stack** — надёжный перехват DNS. Альтернативный `mixed` стек ломает DNS hijack на OpenWrt.
-- **VLESS Reality** — маскирует VPN трафик под обычный HTTPS, обходя DPI блокировки.
+| Решение | Причина |
+|---------|---------|
+| `gvisor` стек | `mixed` ломает DNS hijack (баг #1258) |
+| `auto-route: false` | nikki управляет routing через nftables |
+| `ipv4_dns_hijack: 0` | Иначе `.lan` домены не резолвятся через dnsmasq |
+| dnsmasq → 127.0.0.1#1053 | DNS через mihomo fake-ip, но .lan через dnsmasq |
+| MSS clamping 1452 | Предотвращает PMTUD blackhole через VPN |
+| cgroup изоляция | nikki помещает mihomo в cgroup, трафик mihomo не попадает в redirect |
+| geox_auto_update | Еженедельное обновление GeoIP/GeoSite баз (встроено в nikki) |
+| tcp keepalive 600/15 | Предотвращает разрыв idle-соединений у iOS |
 
-### Файловая структура
+### Файловая структура на роутере
+
+```
+/etc/nikki/
+├── profiles/
+│   └── main.yaml          ← наш профиль (загружается deploy.ps1)
+├── run/
+│   ├── config.yaml        ← сгенерированный никки конфиг
+│   ├── geoip.metadb       ← symlink → /etc/mihomo/geoip.metadb
+│   ├── geosite.dat        ← symlink → /etc/mihomo/geosite.dat
+│   └── ui                 ← symlink → /etc/mihomo/ui
+└── ...
+
+/etc/mihomo/
+├── geoip.metadb           ← GeoIP база (~9 MB)
+├── geosite.dat            ← GeoSite база (~4 MB)
+└── ui/                    ← MetaCubeXD веб-панель
+
+/etc/firewall.user         ← MSS clamping (наш скрипт)
+```
+
+### Файлы репозитория
 
 ```
 .
 ├── deploy.ps1              ← запускать на Windows (главный скрипт)
 ├── mihomo/
-│   └── config.yaml         ← конфигурация (заполни свои VPN данные)
+│   └── config.yaml         ← профиль (заполни VPN данные)
 └── openwrt/
-    └── install_mihomo.sh   ← скрипт установки (запускается на роутере)
+    └── configure_nikki.sh  ← настройка nikki на роутере
 ```
 
 ### Порты Mihomo
 
 | Порт | Назначение |
 |------|-----------|
-| 7890 | Mixed proxy (SOCKS5/HTTP) |
-| 7891 | Transparent redirect (redir-port) |
-| 7892 | TProxy (tproxy-port) |
-| 1053 | DNS сервер (fake-ip) |
+| 7890 | Mixed proxy (SOCKS5/HTTP для ручного использования) |
+| 7891 | Transparent redirect — сюда идёт TCP от LAN |
+| 7892 | TProxy port |
+| 1053 | DNS сервер (fake-ip, принимает от dnsmasq) |
 | 9090 | API и веб-панель |
-
----
-
-## Поддерживаемые роутеры
-
-Протестировано:
-- **Xiaomi AX3000** (OpenWrt 24.10.0, aarch64_cortex-a53)
-
-Должно работать:
-- Любой роутер на OpenWrt 22+ с архитектурой aarch64, armv7, x86_64, mips/mipsel
-- Минимум 64 МБ RAM, 16 МБ Flash (для хранения баз данных)
 
 ---
 
 ## Источники
 
 - [Mihomo (ядро)](https://github.com/MetaCubeX/mihomo)
+- [luci-app-nikki](https://github.com/nikki-kkk/nikki)
 - [MetaCubeXD (веб-панель)](https://github.com/MetaCubeX/metacubexd)
 - [GeoIP/GeoSite базы](https://github.com/MetaCubeX/meta-rules-dat)
 - [OpenWrt](https://openwrt.org)
 
 ---
 
-## Лицензия
-
-MIT — используй свободно для личных нужд.
+MIT License — используй свободно для личных нужд.

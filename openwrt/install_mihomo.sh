@@ -170,6 +170,26 @@ setup_redirect() {
 
 start_service() {
     cleanup
+
+    # Авто-определение WAN интерфейса (ждём до 60 сек после загрузки)
+    local i=0
+    local wan_if=""
+    while [ $i -lt 60 ]; do
+        wan_if=$(ip route show default 2>/dev/null | awk 'NR==1{print $5}')
+        [ -n "$wan_if" ] && [ "$wan_if" != "lo" ] && [ "$wan_if" != "Meta" ] && break
+        wan_if=""
+        sleep 1
+        i=$((i+1))
+    done
+
+    # Обновляем interface-name в конфиге (привязывает VLESS к WAN, предотвращает routing loop)
+    if [ -n "$wan_if" ]; then
+        sed -i "s/interface-name: .*/interface-name: $wan_if/" /etc/mihomo/config.yaml
+        logger -t mihomo "WAN interface: $wan_if"
+    else
+        logger -t mihomo "WARN: WAN не найден за 60 сек, interface-name не обновлён"
+    fi
+
     mkdir -p /etc/mihomo/proxies
     procd_open_instance
     procd_set_param command $PROG -d $WORKDIR

@@ -118,6 +118,7 @@ proxies:
       public-key: YOUR_PUBLIC_KEY  # ← pbk= из ссылки
       short-id: YOUR_SHORT_ID      # ← sid= из ссылки
     client-fingerprint: random
+    interface-name: AUTO    # ← не трогай! init-скрипт подставляет WAN-интерфейс автоматически
 
 proxy-groups:
   - name: "PROXY"

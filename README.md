@@ -1,8 +1,30 @@
 # Прозрачный VPN на роутере OpenWrt + Nikki (Mihomo)
 
-**YouTube, Instagram, TikTok работают автоматически** на всех устройствах в сети. Российские сайты (VK, Яндекс, RuTube) открываются напрямую без VPN.
+**YouTube, Instagram, TikTok работают автоматически** на всех устройствах в сети — телефоне, ТВ, ноутбуке. Российские сайты (VK, Яндекс, RuTube) открываются напрямую без VPN.
 
-Настраивается через скрипт на Windows. Перезагружать роутер после этого не нужно.
+---
+
+## С чего начать?
+
+### Вариант 1: У тебя уже стоит OpenWrt
+
+→ Перейди к **[Быстрый старт](#быстрый-старт)** ниже.
+
+### Вариант 2: Роутер новый (стоит прошивка Xiaomi)
+
+Сначала нужно установить OpenWrt:
+
+→ **[Инструкция по установке OpenWrt на Xiaomi AX3000T](docs/install-openwrt-ax3000t.md)**
+
+После установки OpenWrt и `luci-app-nikki` возвращайся сюда.
+
+### Вариант 3: У тебя другой роутер
+
+Установи OpenWrt с [официального сайта](https://firmware-selector.openwrt.org/), затем через SSH:
+```sh
+opkg update && opkg install luci-app-nikki
+```
+И возвращайся к **[Быстрый старт](#быстрый-старт)**.
 
 ---
 
@@ -10,49 +32,30 @@
 
 ```
   Телефон / ТВ / ПК
-         |
+         │
       [Роутер OpenWrt + Nikki]
-         |                         |
+         │                         │
     youtube.com  →→→  [VPN сервер]  →→→  YouTube
     vk.com       →→→  Напрямую (без VPN)
 ```
 
-**Nikki** (luci-app-nikki) — LuCI-пакет для управления [Mihomo](https://github.com/MetaCubeX/mihomo) на роутере. Он настраивает nftables, routing, TUN-интерфейс и автозапуск. Mihomo перехватывает трафик, смотрит куда идёт соединение, и выбирает маршрут по правилам.
+**Nikki** (luci-app-nikki) управляет [Mihomo](https://github.com/MetaCubeX/mihomo) на роутере. Mihomo перехватывает весь трафик, смотрит куда идёт соединение и выбирает маршрут по правилам — через VPN или напрямую. Устройства в сети ничего не знают о VPN.
 
 ---
 
 ## Что нужно
 
-### Роутер
-- **OpenWrt 24.x** с установленным **luci-app-nikki**
-- Протестировано: Xiaomi AX3000T (aarch64_cortex-a53)
-- Минимум 128 МБ RAM, 32 МБ Flash
+| Что | Детали |
+|-----|--------|
+| **Роутер** | OpenWrt 24.x + luci-app-nikki |
+| **Компьютер** | Windows 10/11 (SSH встроен) |
+| **VPN** | VLESS Reality сервер **или** подписка в mihomo/clash формате |
 
-### Компьютер
-- **Windows 10 или 11** (встроенный SSH)
-
-### VPN
-Один из двух вариантов:
-- **VLESS Reality сервер** (ссылка вида `vless://UUID@HOST:PORT?pbk=...`)
-- **Подписка** в mihomo/clash формате (URL с прокси-листом)
+> Протестировано: Xiaomi AX3000T (OpenWrt 24.10.0, aarch64_cortex-a53)
 
 ---
 
-## Установка — 3 шага
-
-### Шаг 0: Установи luci-app-nikki на роутере
-
-Подключись к роутеру по SSH и выполни:
-
-```sh
-opkg update && opkg install luci-app-nikki
-```
-
-Или через LuCI: **System → Software → Search** → `luci-app-nikki` → Install.
-
-> После установки nikki появится в LuCI: **Services → Nikki**
-
----
+## Быстрый старт
 
 ### Шаг 1: Скачай репозиторий
 
@@ -67,46 +70,46 @@ cd mihomo-openwrt
 
 ### Шаг 2: Заполни данные VPN
 
-Открой **`mihomo/config.yaml`** в любом редакторе.
+Открой **`mihomo/config.yaml`** в любом текстовом редакторе (Блокнот, VS Code, Notepad++).
 
-#### Вариант Б: Ручная VLESS-ссылка (активен по умолчанию)
+#### Вариант Б: Ручная VLESS-ссылка (по умолчанию)
 
-Найди раздел `proxies:` и заполни поля:
+Найди раздел `proxies:` (~строка 140) и замени плейсхолдеры:
 
 ```yaml
 proxies:
   - name: "Мой VPN"
-    type: vless
-    server: YOUR_SERVER          # ← адрес VPN сервера
-    port: 443
+    server: YOUR_SERVER          # ← адрес сервера
     uuid: YOUR_UUID              # ← UUID
-    servername: YOUR_SNI         # ← sni= из ссылки
+    servername: YOUR_SNI         # ← SNI
     reality-opts:
-      public-key: YOUR_PUBLIC_KEY  # ← pbk= из ссылки
-      short-id: YOUR_SHORT_ID      # ← sid= из ссылки
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
 ```
 
 **Как разобрать vless:// ссылку:**
+
 ```
 vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
+         ↑↑↑   ↑↑↑↑↑↑       ↑↑↑↑↑↑↑↑↑     ↑↑↑↑↑↑↑↑   ↑↑↑
+        uuid  server        public-key     short-id    sni
 ```
 
-| Параметр | Откуда |
-|----------|--------|
-| `server` | адрес после `@` |
-| `port` | порт после `:` |
-| `uuid` | строка до `@` |
-| `servername` | параметр `sni=` |
-| `public-key` | параметр `pbk=` |
-| `short-id` | параметр `sid=` |
+| В ссылке | → В конфиг |
+|----------|-----------|
+| строка до `@` | `uuid:` |
+| адрес после `@` | `server:` |
+| `sni=...` | `servername:` |
+| `pbk=...` | `public-key:` |
+| `sid=...` | `short-id:` |
 
-**Также замени** `YOUR_SERVER` в двух других местах:
-- В `fake-ip-filter` (~строка 88): `- "YOUR_SERVER"`
-- В `rules` (~строка 165): `- DOMAIN,YOUR_SERVER,DIRECT`
+**Также замени** `YOUR_SERVER` ещё в двух местах:
+- `fake-ip-filter` (~строка 88): `- "YOUR_SERVER"`
+- `rules` (~строка 165): `- DOMAIN,YOUR_SERVER,DIRECT`
 
 #### Вариант А: Подписка
 
-Раскомментируй секцию `proxy-providers` в конфиге и замени `YOUR_SUBSCRIPTION_URL` на твой URL. Закомментируй или удали секцию `proxies`.
+Раскомментируй секцию `proxy-providers` (~строка 115), замени `YOUR_SUBSCRIPTION_URL` на свой URL. Закомментируй или удали секцию `proxies`.
 
 ---
 
@@ -119,23 +122,20 @@ vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
 .\deploy.ps1
 ```
 
-Скрипт:
-1. Подключается к роутеру по SSH
-2. Загружает профиль в `/etc/nikki/profiles/main.yaml`
-3. Настраивает UCI nikki, dnsmasq, MSS clamping
-4. Запускает nikki и проверяет статус
+Скрипт подключится к роутеру, загрузит профиль, настроит nikki и запустит VPN:
 
 ```
-[1/4] Проверка подключения...  OK
-[2/4] Проверка профиля...      OK
+[1/4] Проверка подключения...  OK: aarch64, nikki установлен
+[2/4] Проверка профиля...      OK: профиль заполнен
 [3/4] Загрузка профиля...      OK
-[4/4] Настройка и запуск...    OK
+[4/4] Настройка и запуск...
 
   VPN alive: TRUE ✓
+
   Веб-панель: http://192.168.1.1:9090/ui
 ```
 
-> **Если PowerShell блокирует скрипт:**
+> **Если PowerShell не запускает скрипт:**
 > ```powershell
 > Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
@@ -146,18 +146,18 @@ vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
 
 1. Подключись к WiFi роутера
 2. Открой **YouTube** → должен работать
-3. Открой **ВКонтакте** → должен работать
+3. Открой **ВКонтакте** → должен работать без VPN
 4. Зайди на **2ip.ru** → должен показать IP VPN сервера (не твой домашний)
 
 ---
 
 ## Веб-панель
 
-**http://192.168.1.1:9090/ui** — MetaCubeXD
+**http://192.168.1.1:9090/ui** (MetaCubeXD)
 
-- Вкладка **Proxies**: статус VPN (alive: true = работает)
-- Вкладка **Connections**: текущие соединения и их маршрут
-- Вкладка **Logs**: логи в реальном времени
+- **Proxies** — статус VPN (alive: true = работает)
+- **Connections** — текущие соединения и их маршрут
+- **Logs** — логи mihomo в реальном времени
 
 ---
 
@@ -166,16 +166,16 @@ vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
 ```sh
 ssh root@192.168.1.1
 
-# Статус
+# Статус nikki
 service nikki status
 
 # Перезапуск
 service nikki restart
 
-# Логи nikki (app)
+# Логи (что происходит при запуске)
 cat /var/log/nikki/app.log
 
-# Логи mihomo (core — соединения, правила)
+# Логи mihomo (соединения, правила)
 cat /var/log/nikki/core.log
 
 # Статус VPN через API
@@ -186,17 +186,14 @@ curl -s http://127.0.0.1:9090/providers/proxies | grep '"alive"'
 
 ## Обновление профиля
 
-Если VPN перестал работать (`alive: false`) — возможно изменился `short-id` на сервере.
+Если VPN перестал работать (`alive: false`) — скорее всего изменился `short-id` на сервере.
 
-1. Обнови `short-id` в `mihomo/config.yaml`
-2. Перезапусти deploy.ps1
+1. Обнови `short-id` (и другие параметры если нужно) в `mihomo/config.yaml`
+2. Запусти `deploy.ps1` снова
 
 Или вручную на роутере:
 ```sh
-ssh root@192.168.1.1
-# Отредактируй профиль
 vi /etc/nikki/profiles/main.yaml
-# Перезапусти nikki
 service nikki restart
 ```
 
@@ -205,42 +202,47 @@ service nikki restart
 ## Частые проблемы
 
 ### VPN alive: false
-- `server`, `uuid`, `public-key`, `short-id` скопированы точно, без пробелов?
-- `short-id` актуален? (сервер мог его сменить — скачай свежую подписку)
+- `server`, `uuid`, `public-key`, `short-id` скопированы точно без пробелов?
+- `short-id` актуален? (сервер мог сменить — скачай свежую подписку)
 - Нет лишней строки `flow:` если её не было в ссылке?
 
-### iPhone/Android пишет "Нет интернета" при подключении к WiFi
-Профиль уже содержит правила для captive portal (`captive.apple.com`, `connectivitycheck.gstatic.com`). Это нормально при первом подключении. Если ошибка постоянная — `service nikki restart`.
+### iPhone/Android пишет "Нет интернета"
+Это captive portal detection. Профиль уже содержит правила для `captive.apple.com` и `connectivitycheck.gstatic.com` — должно работать. Если ошибка постоянная: `service nikki restart`.
 
-### Не открываются некоторые сайты (HTTPS)
-MSS clamping настраивается автоматически скриптом. Если проблема осталась:
+### Не открываются некоторые HTTPS-сайты
+MSS clamping настраивается автоматически скриптом. Проверь:
 ```sh
 nft list table inet mss_clamp
 ```
-Должна быть таблица с правилом `tcp option maxseg size set 1452`.
+Должно быть правило `tcp option maxseg size set 1452`.
 
 ### Российские сайты (.ru) идут через VPN
-Проверь что GeoSite базы загружены:
+GeoSite базы не загружены. Проверь:
 ```sh
 ls -lh /etc/mihomo/geosite.dat
 ```
-Если файла нет — скачай вручную:
+Если файла нет:
 ```sh
 wget -O /etc/mihomo/geosite.dat \
   https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat
 service nikki restart
 ```
 
-### Nikki не запускается / статус "stopped"
+### "luci-app-nikki не установлен" при запуске deploy.ps1
+```sh
+ssh root@192.168.1.1
+opkg update && opkg install luci-app-nikki
+```
+
+### Nikki не запускается
 ```sh
 cat /var/log/nikki/app.log
 cat /var/log/nikki/core.log
 ```
 
-### SSH не подключается
-- Убедись что в одной сети с роутером
-- Проверь: `ping 192.168.1.1`
-- На OpenWrt: **System → Administration → SSH Access** — должен быть включён
+### SSH не подключается к роутеру
+- Проверь подключение: `ping 192.168.1.1`
+- На OpenWrt: **System → Administration → SSH Access** должен быть включён
 
 ---
 
@@ -251,7 +253,7 @@ cat /var/log/nikki/core.log
 ```
 LAN устройство (телефон)
     │
-    ↓ DNS запрос → порт 53
+    ↓ DNS запрос на порт 53
 [dnsmasq] → форвард → [Mihomo DNS :1053]
     ← fake-IP (198.18.x.x)
     │
@@ -263,65 +265,56 @@ LAN устройство (телефон)
     ├─ GEOIP RU → DIRECT (российские IP)
     └─ MATCH → PROXY → [VLESS Reality туннель] → интернет
     │
-    ↓ UDP соединение (DNS, QUIC, и т.д.)
-[nftables fwmark 0x81] → ip rule → table 81 → default via Meta (TUN)
+    ↓ UDP трафик
+[nftables fwmark 0x81] → table 81 → default via Meta (TUN)
     │
-[Mihomo TUN :gvisor] → правила → PROXY / DIRECT
+[Mihomo TUN gvisor] → PROXY / DIRECT
 ```
 
 ### Почему именно так
 
 | Решение | Причина |
 |---------|---------|
-| `gvisor` стек | `mixed` ломает DNS hijack (баг #1258) |
-| `auto-route: false` | nikki управляет routing через nftables |
+| `gvisor` стек TUN | `mixed` ломает DNS hijack (баг #1258) |
+| `auto-route: false` | nikki управляет routing через nftables сам |
 | `ipv4_dns_hijack: 0` | Иначе `.lan` домены не резолвятся через dnsmasq |
 | dnsmasq → 127.0.0.1#1053 | DNS через mihomo fake-ip, но .lan через dnsmasq |
 | MSS clamping 1452 | Предотвращает PMTUD blackhole через VPN |
-| cgroup изоляция | nikki помещает mihomo в cgroup, трафик mihomo не попадает в redirect |
-| geox_auto_update | Еженедельное обновление GeoIP/GeoSite баз (встроено в nikki) |
+| cgroup изоляция | Трафик самого mihomo не попадает в nftables redirect |
+| geox_auto_update | Еженедельное обновление GeoIP/GeoSite (встроено в nikki) |
 | tcp keepalive 600/15 | Предотвращает разрыв idle-соединений у iOS |
 
-### Файловая структура на роутере
+### Файлы на роутере
 
 ```
-/etc/nikki/
-├── profiles/
-│   └── main.yaml          ← наш профиль (загружается deploy.ps1)
-├── run/
-│   ├── config.yaml        ← сгенерированный никки конфиг
-│   ├── geoip.metadb       ← symlink → /etc/mihomo/geoip.metadb
-│   ├── geosite.dat        ← symlink → /etc/mihomo/geosite.dat
-│   └── ui                 ← symlink → /etc/mihomo/ui
-└── ...
-
-/etc/mihomo/
-├── geoip.metadb           ← GeoIP база (~9 MB)
-├── geosite.dat            ← GeoSite база (~4 MB)
-└── ui/                    ← MetaCubeXD веб-панель
-
-/etc/firewall.user         ← MSS clamping (наш скрипт)
+/etc/nikki/profiles/main.yaml   ← наш профиль
+/etc/mihomo/geoip.metadb        ← GeoIP база (~9 MB)
+/etc/mihomo/geosite.dat         ← GeoSite база (~4 MB)
+/etc/mihomo/ui/                 ← MetaCubeXD веб-панель
+/etc/firewall.user              ← MSS clamping
 ```
 
 ### Файлы репозитория
 
 ```
 .
-├── deploy.ps1              ← запускать на Windows (главный скрипт)
+├── deploy.ps1                      ← запускать на Windows
 ├── mihomo/
-│   └── config.yaml         ← профиль (заполни VPN данные)
-└── openwrt/
-    └── configure_nikki.sh  ← настройка nikki на роутере
+│   └── config.yaml                 ← профиль (заполни VPN данные)
+├── openwrt/
+│   └── configure_nikki.sh          ← настройка nikki на роутере
+└── docs/
+    └── install-openwrt-ax3000t.md  ← установка OpenWrt (новый роутер)
 ```
 
 ### Порты Mihomo
 
 | Порт | Назначение |
 |------|-----------|
-| 7890 | Mixed proxy (SOCKS5/HTTP для ручного использования) |
+| 7890 | Mixed proxy (SOCKS5/HTTP) |
 | 7891 | Transparent redirect — сюда идёт TCP от LAN |
 | 7892 | TProxy port |
-| 1053 | DNS сервер (fake-ip, принимает от dnsmasq) |
+| 1053 | DNS сервер (fake-ip) |
 | 9090 | API и веб-панель |
 
 ---
@@ -333,6 +326,7 @@ LAN устройство (телефон)
 - [MetaCubeXD (веб-панель)](https://github.com/MetaCubeX/metacubexd)
 - [GeoIP/GeoSite базы](https://github.com/MetaCubeX/meta-rules-dat)
 - [OpenWrt](https://openwrt.org)
+- [Firmware Selector для AX3000T](https://firmware-selector.openwrt.org/?target=mediatek%2Ffilogic&id=xiaomi_mi-router-ax3000t)
 
 ---
 

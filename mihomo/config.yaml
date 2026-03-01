@@ -1,0 +1,157 @@
+# ============================================================
+#  Mihomo config: VLESS Reality — прозрачный VPN для OpenWrt
+#  Инструкция: https://github.com/YOUR_USERNAME/YOUR_REPO
+# ============================================================
+#
+#  Что заполнить ТУТ:
+#    server, uuid, servername, public-key, short-id  (строки ~95-110)
+#
+#  Остальное трогать не нужно.
+# ============================================================
+
+mixed-port: 7890
+redir-port: 7891
+tproxy-port: 7892
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+ipv6: false
+
+profile:
+  store-fake-ip: true
+
+# Веб-панель: http://192.168.1.1:9090/ui
+external-controller: 0.0.0.0:9090
+external-ui: /etc/mihomo/ui
+secret: ""
+
+# TUN — перехватывает весь трафик
+tun:
+  enable: true
+  stack: gvisor              # gvisor: надёжный перехват DNS
+  device: Meta
+  dns-hijack:
+    - "any:53"
+    - "tcp://any:53"
+  auto-route: true
+  auto-redirect: false       # Отключено — redirect настраивается через nftables в init-скрипте
+  auto-detect-interface: true
+  strict-route: false        # false обязателен на роутере (иначе блокирует LAN)
+  mtu: 1500
+  route-exclude-address:     # Исключить LAN и private из TUN (предотвращает routing loop)
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "100.64.0.0/10"
+    - "127.0.0.0/8"
+    - "169.254.0.0/16"
+    - "224.0.0.0/4"
+    - "240.0.0.0/4"
+
+dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    # Локальная сеть — реальные IP
+    - "+.lan"
+    - "+.local"
+    - "+.localdomain"
+    - "localhost.localdomain"
+    # NTP — ОБЯЗАТЕЛЬНО реальный IP (fake-ip ломает синхронизацию времени)
+    - "+.pool.ntp.org"
+    - "time.+*"
+    - "ntp.+*"
+    - "time.*.com"
+    - "ntp.*.com"
+    - "time.windows.com"
+    - "time.cloudflare.com"
+    - "time.apple.com"
+    # STUN / WebRTC
+    - "+.stun.*.*"
+    - "stun.+*"
+    # Windows — иначе пишет "Нет интернета"
+    - "+.msftncsi.com"
+    - "+.msftconnecttest.com"
+    # iOS captive portal — ОБЯЗАТЕЛЬНО реальный IP, иначе iOS считает что нет интернета
+    - "captive.apple.com"
+    - "+.captive.apple.com"
+    # Android captive portal detection
+    - "connectivitycheck.gstatic.com"
+    - "clients3.google.com"
+    # VPN сервер — ОБЯЗАТЕЛЬНО реальный IP (иначе routing loop!)
+    - "YOUR_SERVER"          # ← замени на адрес твоего VPN сервера
+
+  # Bootstrap DNS: только plain IP
+  default-nameserver:
+    - 8.8.8.8
+    - 1.1.1.1
+  nameserver:
+    - https://dns.google/dns-query
+    - https://dns.cloudflare.com/dns-query
+  fallback:
+    - tls://1.1.1.1:853
+  fallback-filter:
+    geoip: true
+    geoip-code: RU
+
+# ============================================================
+#  НАСТРОЙКИ VPN — ЗАПОЛНИ ЭТИ ПОЛЯ
+#
+#  Как получить параметры из vless:// ссылки:
+#  vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
+# ============================================================
+proxies:
+  - name: "Мой VPN"
+    type: vless
+    server: YOUR_SERVER          # ← адрес VPN сервера (из ссылки, часть после @)
+    port: 443                    # ← порт (обычно 443)
+    uuid: YOUR_UUID              # ← UUID (из ссылки, часть до @)
+    network: tcp
+    tls: true
+    udp: true
+    servername: YOUR_SNI         # ← sni= из ссылки
+    reality-opts:
+      public-key: YOUR_PUBLIC_KEY  # ← pbk= из ссылки
+      short-id: YOUR_SHORT_ID      # ← sid= из ссылки
+    client-fingerprint: random
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - "Мой VPN"
+      - DIRECT
+
+rules:
+  # VPN сервер — ПРЯМО (предотвращает routing loop!)
+  - DOMAIN,YOUR_SERVER,DIRECT
+
+  # Captive portal detection — ПРЯМО (чтобы iOS/Android видели интернет!)
+  - DOMAIN,captive.apple.com,DIRECT
+  - DOMAIN,connectivitycheck.gstatic.com,DIRECT
+  - DOMAIN,clients3.google.com,DIRECT
+
+  # Локальные сети — прямо
+  - DOMAIN-SUFFIX,lan,DIRECT
+  - DOMAIN-SUFFIX,local,DIRECT
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+
+  # Россия напрямую (домены + IP)
+  # private = локальные/приватные домены
+  # tld-ru = все домены .ru/.рф
+  # category-ru = российские сервисы (VK, Mail.ru, Яндекс, RuTube и др.)
+  - GEOSITE,private,DIRECT
+  - GEOSITE,tld-ru,DIRECT
+  - GEOSITE,category-ru,DIRECT
+  - GEOIP,RU,DIRECT
+
+  # Всё остальное — через VPN (YouTube, Instagram, TikTok и т.д.)
+  - MATCH,PROXY

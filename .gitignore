@@ -1,0 +1,20 @@
+# Бинарники mihomo (скачиваются автоматически установочным скриптом)
+mihomo-linux-*
+*.gz
+
+# Пакеты OpenWrt (не нужны в репо)
+packages/
+
+# Временные файлы Windows
+*.tmp
+Thumbs.db
+desktop.ini
+
+# Настройки редакторов
+.vscode/
+.idea/
+*.swp
+*~
+
+# Claude Code (внутренние настройки)
+.claude/

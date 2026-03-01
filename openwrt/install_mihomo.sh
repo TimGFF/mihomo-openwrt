@@ -166,6 +166,10 @@ setup_redirect() {
     nft add rule inet mihomo prerouting 'ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } return'
     nft add rule inet mihomo prerouting 'meta nfproto ipv4 meta l4proto tcp redirect to :7891'
     logger -t mihomo "nftables: LAN TCP -> :7891 OK"
+    # TCP MSS clamping — предотвращает проблемы с большими пакетами через VPN
+    nft add chain inet mihomo postrouting '{ type filter hook postrouting priority mangle; }'
+    nft add rule inet mihomo postrouting 'tcp flags syn tcp option maxseg size > 1452 tcp option maxseg size set 1452'
+    logger -t mihomo "nftables: MSS clamp -> 1452 OK"
 }
 
 start_service() {
@@ -320,14 +324,49 @@ WATCHEOF
 chmod +x /usr/sbin/mihomo-watchdog
 echo "  OK: watchdog /usr/sbin/mihomo-watchdog"
 
-# Cron: каждые 3 минуты
-if ! grep -q 'mihomo-watchdog' /etc/crontabs/root 2>/dev/null; then
-    mkdir -p /etc/crontabs
-    echo '*/3 * * * * /usr/sbin/mihomo-watchdog' >> /etc/crontabs/root
+# ── GeoData auto-update (еженедельно) ─────────────────────────
+cat > /usr/sbin/mihomo-update-geo << 'GEOEOF'
+#!/bin/sh
+# Обновление GeoIP/GeoSite баз данных
+GEODATA_BASE="https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
+WORKDIR="/etc/mihomo"
+UPDATED=0
+
+logger -t mihomo "update-geo: начало обновления"
+if wget -q -O "${WORKDIR}/geoip.metadb.tmp" "${GEODATA_BASE}/geoip.metadb" 2>/dev/null; then
+    mv "${WORKDIR}/geoip.metadb.tmp" "${WORKDIR}/geoip.metadb"
+    logger -t mihomo "update-geo: geoip.metadb обновлён"
+    UPDATED=1
+else
+    rm -f "${WORKDIR}/geoip.metadb.tmp"
+    logger -t mihomo "WARN update-geo: не удалось обновить geoip.metadb"
 fi
+
+if wget -q -O "${WORKDIR}/geosite.dat.tmp" "${GEODATA_BASE}/geosite.dat" 2>/dev/null; then
+    mv "${WORKDIR}/geosite.dat.tmp" "${WORKDIR}/geosite.dat"
+    logger -t mihomo "update-geo: geosite.dat обновлён"
+    UPDATED=1
+else
+    rm -f "${WORKDIR}/geosite.dat.tmp"
+    logger -t mihomo "WARN update-geo: не удалось обновить geosite.dat"
+fi
+
+[ "$UPDATED" -eq 1 ] && service mihomo restart
+GEOEOF
+chmod +x /usr/sbin/mihomo-update-geo
+echo "  OK: geo-updater /usr/sbin/mihomo-update-geo"
+
+# Cron: watchdog каждые 3 минуты, geo-update каждое воскресенье в 4:00
+mkdir -p /etc/crontabs
+{
+    grep -v 'mihomo-watchdog\|mihomo-update-geo' /etc/crontabs/root 2>/dev/null || true
+    echo '*/3 * * * * /usr/sbin/mihomo-watchdog'
+    echo '0 4 * * 0 /usr/sbin/mihomo-update-geo'
+} > /etc/crontabs/root.tmp
+mv /etc/crontabs/root.tmp /etc/crontabs/root
 /etc/init.d/cron enable 2>/dev/null || true
 /etc/init.d/cron restart 2>/dev/null || true
-echo "  OK: cron каждые 3 минуты"
+echo "  OK: cron (watchdog */3, geo-update воскресенье 4:00)"
 
 echo ""
 echo "========================================"

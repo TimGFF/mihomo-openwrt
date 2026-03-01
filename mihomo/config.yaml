@@ -1,12 +1,19 @@
 # ============================================================
 #  Mihomo config: VLESS Reality — прозрачный VPN для OpenWrt
-#  Инструкция: https://github.com/YOUR_USERNAME/YOUR_REPO
+#  Инструкция: https://github.com/TimGFF/mihomo-openwrt
 # ============================================================
 #
-#  Что заполнить ТУТ:
-#    server, uuid, servername, public-key, short-id  (строки ~95-110)
+#  ДВА ВАРИАНТА НАСТРОЙКИ — выбери один:
 #
-#  Остальное трогать не нужно.
+#  ВАРИАНТ A: Подписка (автообновление прокси)
+#    — раскомментируй секцию "proxy-providers" ниже (~строки 110-130)
+#    — закомментируй/удали секцию "proxies" (~строки 135-155)
+#    — замени YOUR_SUBSCRIPTION_URL на твой URL
+#
+#  ВАРИАНТ Б: Ручная VLESS-ссылка (без подписки)
+#    — заполни server, uuid, servername, public-key, short-id (~строки 138-152)
+#    — это активный вариант по умолчанию
+#
 # ============================================================
 
 mixed-port: 7890
@@ -99,7 +106,36 @@ dns:
     geoip-code: RU
 
 # ============================================================
-#  НАСТРОЙКИ VPN — ЗАПОЛНИ ЭТИ ПОЛЯ
+#  ВАРИАНТ A: Подписка (proxy-providers)
+#  Раскомментируй, если используешь подписку вместо ручной VLESS
+# ============================================================
+#
+# proxy-providers:
+#   subscription:
+#     type: http
+#     url: "YOUR_SUBSCRIPTION_URL"     # ← твой URL подписки (mihomo/clash формат)
+#     interval: 3600                   # обновление каждый час
+#     proxy: DIRECT                    # скачивать подписку напрямую
+#     path: ./proxies/subscription.yaml
+#     override:
+#       interface-name: AUTO           # init-скрипт подставит реальный WAN автоматически
+#     health-check:
+#       enable: true
+#       url: "http://www.gstatic.com/generate_204"
+#       interval: 300
+#       lazy: true
+#
+# proxy-groups:
+#   - name: "PROXY"
+#     type: url-test          # автовыбор лучшего прокси
+#     use:
+#       - subscription
+#     url: "http://www.gstatic.com/generate_204"
+#     interval: 300
+#     tolerance: 50           # допуск задержки в мс
+
+# ============================================================
+#  ВАРИАНТ Б: Ручная VLESS Reality (активен по умолчанию)
 #
 #  Как получить параметры из vless:// ссылки:
 #  vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...

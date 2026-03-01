@@ -23,7 +23,7 @@ echo ""
 # ============================================================
 #  1. ЗАВИСИМОСТИ
 # ============================================================
-echo "[1/6] Установка зависимостей..."
+echo "[1/7] Установка зависимостей..."
 opkg update 2>/dev/null | tail -1 || true
 for pkg in kmod-tun kmod-inet-diag ca-bundle ca-certificates; do
     opkg install "$pkg" 2>/dev/null && echo "  + $pkg" || echo "  ~ $pkg (уже установлен)"
@@ -33,7 +33,7 @@ done
 #  2. ОПРЕДЕЛЕНИЕ АРХИТЕКТУРЫ
 # ============================================================
 echo ""
-echo "[2/6] Определение архитектуры..."
+echo "[2/7] Определение архитектуры..."
 ARCH=$(uname -m)
 echo "  Архитектура: $ARCH"
 
@@ -57,7 +57,7 @@ echo "  Файл: $MIHOMO_FILE"
 #  3. СКАЧИВАНИЕ MIHOMO
 # ============================================================
 echo ""
-echo "[3/6] Скачивание Mihomo ${MIHOMO_VERSION}..."
+echo "[3/7] Скачивание Mihomo ${MIHOMO_VERSION}..."
 cd /tmp
 rm -f /tmp/mihomo.gz /tmp/mihomo 2>/dev/null || true
 
@@ -86,7 +86,7 @@ fi
 #  4. ДИРЕКТОРИИ И БАЗЫ ДАННЫХ
 # ============================================================
 echo ""
-echo "[4/6] Скачивание баз данных GeoIP/GeoSite..."
+echo "[4/7] Скачивание баз данных GeoIP/GeoSite..."
 mkdir -p ${WORKDIR}/proxies ${WORKDIR}/ui
 
 # GeoIP (нужна для правила GEOIP,RU,DIRECT)
@@ -128,7 +128,7 @@ fi
 #  5. СЕРВИС /etc/init.d/mihomo
 # ============================================================
 echo ""
-echo "[5/6] Создание сервиса /etc/init.d/mihomo..."
+echo "[5/7] Создание сервиса /etc/init.d/mihomo..."
 
 cat > /etc/init.d/mihomo << 'INITEOF'
 #!/bin/sh /etc/rc.common
@@ -224,7 +224,7 @@ echo "  OK: сервис создан и включён в автозапуск"
 #  6. НАСТРОЙКА DNSMASQ И FIREWALL
 # ============================================================
 echo ""
-echo "[6/6] Настройка dnsmasq и firewall..."
+echo "[6/7] Настройка dnsmasq и firewall..."
 
 # dnsmasq -> mihomo DNS (127.0.0.1:1053)
 uci set dhcp.@dnsmasq[0].noresolv='1'
@@ -249,6 +249,85 @@ if ! uci show firewall 2>/dev/null | grep -q "Allow-Mihomo-Dashboard"; then
 else
     echo "  OK: firewall rule (уже есть)"
 fi
+
+echo ""
+echo "[7/7] Установка watchdog и hotplug..."
+
+# ── Hotplug: перезапуск при появлении WAN интерфейса ──────────
+mkdir -p /etc/hotplug.d/iface/
+cat > /etc/hotplug.d/iface/30-mihomo << 'HOTPLUGEOF'
+#!/bin/sh
+# Перезапуск Mihomo при появлении WAN (после загрузки или смене интерфейса)
+
+[ "$ACTION" = "ifup" ] || exit 0
+
+# Пропускаем LAN и внутренние интерфейсы
+case "$DEVICE" in
+    lo|br-lan|phy0-ap0|phy1-ap0|Meta) exit 0 ;;
+    lan*) exit 0 ;;
+esac
+
+# Ждём только если mihomo уже запущен (init.d стартует сам при первом запуске)
+pidof mihomo >/dev/null 2>&1 || exit 0
+
+sleep 3
+
+WAN_IF=$(ip route show default 2>/dev/null | awk 'NR==1{print $5}')
+[ -z "$WAN_IF" ] || [ "$WAN_IF" = "lo" ] || [ "$WAN_IF" = "Meta" ] && exit 0
+
+CURRENT=$(grep 'interface-name:' /etc/mihomo/config.yaml 2>/dev/null | awk '{print $2}')
+
+if [ "$CURRENT" != "$WAN_IF" ]; then
+    logger -t mihomo "hotplug: WAN=$WAN_IF (было: $CURRENT) -> перезапуск"
+    sed -i "s/interface-name: .*/interface-name: $WAN_IF/" /etc/mihomo/config.yaml
+    service mihomo restart
+fi
+HOTPLUGEOF
+echo "  OK: hotplug /etc/hotplug.d/iface/30-mihomo"
+
+# ── Watchdog: проверка каждые 3 минуты ────────────────────────
+cat > /usr/sbin/mihomo-watchdog << 'WATCHEOF'
+#!/bin/sh
+# Watchdog: перезапуск Mihomo при ошибках интерфейса или VPN
+
+# Mihomo не запущен — запускаем
+if ! pidof mihomo >/dev/null 2>&1; then
+    logger -t mihomo "watchdog: mihomo не запущен, запускаем"
+    service mihomo start
+    exit 0
+fi
+
+PID=$(pidof mihomo | awk '{print $1}')
+
+# Проверяем "no such device" в последних логах текущего процесса
+if logread 2>/dev/null | grep "mihomo\[$PID\]" | tail -20 | grep -q "no such device"; then
+    logger -t mihomo "watchdog: 'no such device', перезапуск"
+    WAN_IF=$(ip route show default 2>/dev/null | awk 'NR==1{print $5}')
+    if [ -n "$WAN_IF" ] && [ "$WAN_IF" != "lo" ] && [ "$WAN_IF" != "Meta" ]; then
+        sed -i "s/interface-name: .*/interface-name: $WAN_IF/" /etc/mihomo/config.yaml
+    fi
+    service mihomo restart
+    exit 0
+fi
+
+# Проверяем что VPN живой
+ALIVE=$(wget -q -O - 'http://localhost:9090/proxies' 2>/dev/null | grep -c '"alive":true')
+if [ "${ALIVE:-0}" -eq 0 ]; then
+    logger -t mihomo "watchdog: VPN alive=false, перезапуск"
+    service mihomo restart
+fi
+WATCHEOF
+chmod +x /usr/sbin/mihomo-watchdog
+echo "  OK: watchdog /usr/sbin/mihomo-watchdog"
+
+# Cron: каждые 3 минуты
+if ! grep -q 'mihomo-watchdog' /etc/crontabs/root 2>/dev/null; then
+    mkdir -p /etc/crontabs
+    echo '*/3 * * * * /usr/sbin/mihomo-watchdog' >> /etc/crontabs/root
+fi
+/etc/init.d/cron enable 2>/dev/null || true
+/etc/init.d/cron restart 2>/dev/null || true
+echo "  OK: cron каждые 3 минуты"
 
 echo ""
 echo "========================================"

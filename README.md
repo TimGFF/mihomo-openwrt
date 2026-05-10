@@ -22,7 +22,11 @@
 
 Установи OpenWrt с [официального сайта](https://firmware-selector.openwrt.org/), затем через SSH:
 ```sh
-opkg update && opkg install luci-app-nikki
+# OpenWrt 24.10:
+opkg update && opkg install luci-app-nikki curl
+
+# OpenWrt 25.12+:
+apk update && apk add luci-app-nikki curl
 ```
 И возвращайся к **[Быстрый старт](#быстрый-старт)**.
 
@@ -72,19 +76,23 @@ cd mihomo-openwrt
 
 Открой **`mihomo/config.yaml`** в любом текстовом редакторе (Блокнот, VS Code, Notepad++).
 
-#### Вариант Б: Ручная VLESS-ссылка (по умолчанию)
+#### Вариант Б: Ручная VLESS-ссылка (по умолчанию, активный)
 
-Найди раздел `proxies:` (~строка 140) и замени плейсхолдеры:
+В профиле уже есть пример с **двумя серверами в fallback-группе** (NL основной, DE резервный — при отказе одного автоматически переключается на другой). Найди секцию `proxies:` и замени данные на свои:
 
 ```yaml
 proxies:
-  - name: "Мой VPN"
-    server: YOUR_SERVER          # ← адрес сервера
-    uuid: YOUR_UUID              # ← UUID
-    servername: YOUR_SNI         # ← SNI
+  - name: "NL"
+    server: YOUR_SERVER          # ← адрес сервера (основной)
+    uuid: YOUR_UUID
+    servername: YOUR_SNI
     reality-opts:
       public-key: YOUR_PUBLIC_KEY
       short-id: YOUR_SHORT_ID
+
+  - name: "DE"
+    # … второй сервер для резерва. Можно удалить эту запись
+    # и убрать "DE" из proxy-groups.PROXY если он не нужен.
 ```
 
 **Как разобрать vless:// ссылку:**
@@ -203,8 +211,22 @@ service nikki restart
 
 ### VPN alive: false
 - `server`, `uuid`, `public-key`, `short-id` скопированы точно без пробелов?
-- `short-id` актуален? (сервер мог сменить — скачай свежую подписку)
+- `short-id` актуален? (сервер мог сменить — попроси у провайдера новую vless-ссылку)
 - Нет лишней строки `flow:` если её не было в ссылке?
+
+### "Работало, через месяц перестало"
+Самые частые причины (в порядке вероятности):
+1. **Подписка отдаёт 404** (провайдер удалил/ротировал URL). Проверь:
+   ```sh
+   tail /var/log/nikki/core.log | grep -i 'pull error\|404'
+   ```
+   Решение — попроси у провайдера актуальную ссылку или vless://.
+2. **Сервер сменил short-id/public-key** — обнови в `mihomo/config.yaml` и передеплой.
+3. **Watchdog не стоит** — без него один краш mihomo уводит VPN в "тихий мёртвый" режим. Скрипт `configure_nikki.sh` ставит cron-watchdog (`/usr/bin/nikki-watchdog`) — проверь:
+   ```sh
+   crontab -l | grep nikki-watchdog
+   tail /var/log/nikki/watchdog.log
+   ```
 
 ### iPhone/Android пишет "Нет интернета"
 Это captive portal detection. Профиль уже содержит правила для `captive.apple.com` и `connectivitycheck.gstatic.com` — должно работать. Если ошибка постоянная: `service nikki restart`.
@@ -302,10 +324,19 @@ LAN устройство (телефон)
 ├── mihomo/
 │   └── config.yaml                 ← профиль (заполни VPN данные)
 ├── openwrt/
-│   └── configure_nikki.sh          ← настройка nikki на роутере
+│   └── configure_nikki.sh          ← настройка nikki + watchdog на роутере
 └── docs/
     └── install-openwrt-ax3000t.md  ← установка OpenWrt (новый роутер)
 ```
+
+### Watchdog
+
+`configure_nikki.sh` ставит на роутер `/usr/bin/nikki-watchdog` и cron `*/5 * * * *`. Каждые 5 минут проверяется:
+1. `service nikki status` = running
+2. процесс `mihomo` живой
+3. PROXY-группа `alive: true` через API mihomo
+
+При **3 подряд** провалах — `service nikki restart` + запись в `/var/log/nikki/watchdog.log`. Это защищает от ситуации "VPN тихо умер на месяц".
 
 ### Порты Mihomo
 
@@ -322,7 +353,7 @@ LAN устройство (телефон)
 ## Источники
 
 - [Mihomo (ядро)](https://github.com/MetaCubeX/mihomo)
-- [luci-app-nikki](https://github.com/nikki-kkk/nikki)
+- [luci-app-nikki (OpenWrt)](https://github.com/nikkinikki-org/OpenWrt-nikki)
 - [MetaCubeXD (веб-панель)](https://github.com/MetaCubeX/metacubexd)
 - [GeoIP/GeoSite базы](https://github.com/MetaCubeX/meta-rules-dat)
 - [OpenWrt](https://openwrt.org)

@@ -1,18 +1,11 @@
 # ============================================================
 #  Nikki (Mihomo) profile: прозрачный VPN для OpenWrt
-#  Репозиторий: https://github.com/TimGFF/mihomo-openwrt
+#  Активная схема: ручные VLESS Reality + автофолбэк
 # ============================================================
 #
-#  ДВА ВАРИАНТА НАСТРОЙКИ — выбери один:
-#
-#  ВАРИАНТ A: Подписка (автообновление прокси)
-#    — раскомментируй секцию "proxy-providers" ниже (~строки 115-135)
-#    — закомментируй/удали секцию "proxies" (~строки 140-160)
-#    — замени YOUR_SUBSCRIPTION_URL на твой URL
-#
-#  ВАРИАНТ Б: Ручная VLESS-ссылка (без подписки)
-#    — заполни server, uuid, servername, public-key, short-id (~строки 143-157)
-#    — это активный вариант по умолчанию
+#  Чтобы добавить/заменить прокси — отредактируй секцию `proxies:`
+#  ниже (~строки 110-145). Имена в `proxy-groups → fallback` должны
+#  совпадать с именами в `proxies`.
 #
 # ============================================================
 
@@ -33,21 +26,30 @@ external-controller: 0.0.0.0:9090
 external-ui: /etc/mihomo/ui
 secret: ""
 
+# Geo базы: автообновление (раз в 7 дней). Прописано в профиле, не в UCI nikki —
+# не зависит от схемы UCI и работает на любой версии luci-app-nikki.
+geodata-mode: false
+geo-auto-update: true
+geo-update-interval: 168
+geox-url:
+  geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
+  geosite: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
+  mmdb: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb"
+
 # TUN — перехватывает UDP трафик
-# Примечание: routing управляется nikki через nftables, не mihomo
 tun:
   enable: true
-  stack: gvisor              # gvisor: надёжный перехват DNS (mixed ломает DNS hijack — баг #1258)
+  stack: gvisor
   device: Meta
   dns-hijack:
     - "any:53"
     - "tcp://any:53"
-  auto-route: false          # nikki управляет routing через nftables
+  auto-route: false
   auto-redirect: false
   auto-detect-interface: false
-  strict-route: false        # false обязателен на роутере (иначе блокирует LAN)
+  strict-route: false
   mtu: 1500
-  route-exclude-address:     # Исключить LAN и private из TUN
+  route-exclude-address:
     - "192.168.0.0/16"
     - "10.0.0.0/8"
     - "172.16.0.0/12"
@@ -69,7 +71,7 @@ dns:
     - "+.local"
     - "+.localdomain"
     - "localhost.localdomain"
-    # NTP — ОБЯЗАТЕЛЬНО реальный IP (fake-ip ломает синхронизацию времени)
+    # NTP — обязательно реальный IP
     - "+.pool.ntp.org"
     - "time.+*"
     - "ntp.+*"
@@ -81,19 +83,21 @@ dns:
     # STUN / WebRTC
     - "+.stun.*.*"
     - "stun.+*"
-    # Windows — иначе пишет "Нет интернета"
+    # Windows captive
     - "+.msftncsi.com"
     - "+.msftconnecttest.com"
-    # iOS captive portal — ОБЯЗАТЕЛЬНО реальный IP, иначе iOS видит "нет интернета"
+    # iOS captive
     - "captive.apple.com"
     - "+.captive.apple.com"
-    # Android captive portal detection
+    # Android captive
     - "connectivitycheck.gstatic.com"
     - "clients3.google.com"
-    # VPN сервер — ОБЯЗАТЕЛЬНО реальный IP (иначе routing loop!)
-    - "YOUR_SERVER"          # ← замени на домен/адрес твоего VPN сервера
+    # VPN серверы — реальный IP (иначе routing loop!)
+    - "nilsanderson.ohbah.com"
+    - "nilsanderson1.ohbah.com"
+    - "matrixx.website"
+    - "de.matrixx.website"
 
-  # Bootstrap DNS: только plain IP
   default-nameserver:
     - 8.8.8.8
     - 1.1.1.1
@@ -102,66 +106,57 @@ dns:
     - https://dns.cloudflare.com/dns-query
 
 # ============================================================
-#  ВАРИАНТ A: Подписка (proxy-providers)
-#  Раскомментируй, если используешь подписку вместо ручной VLESS
-# ============================================================
-#
-# proxy-providers:
-#   subscription:
-#     type: http
-#     url: "YOUR_SUBSCRIPTION_URL"     # ← твой URL подписки (mihomo/clash формат)
-#     interval: 3600                   # обновление каждый час
-#     proxy: DIRECT                    # скачивать подписку напрямую
-#     path: ./proxies/subscription.yaml
-#     health-check:
-#       enable: true
-#       url: "http://www.gstatic.com/generate_204"
-#       interval: 300
-#       lazy: true
-#
-# proxy-groups:
-#   - name: "PROXY"
-#     type: url-test          # автовыбор лучшего прокси
-#     use:
-#       - subscription
-#     url: "http://www.gstatic.com/generate_204"
-#     interval: 300
-#     tolerance: 50           # допуск задержки в мс
-
-# ============================================================
-#  ВАРИАНТ Б: Ручная VLESS Reality (активен по умолчанию)
-#
-#  Как получить параметры из vless:// ссылки:
-#  vless://UUID@SERVER:PORT?pbk=PUBLIC_KEY&sid=SHORT_ID&sni=SNI&...
+#  Прокси: NL основной, DE резервный (fallback автоматически
+#  переключится при отказе одного из серверов)
 # ============================================================
 proxies:
-  - name: "Мой VPN"
+  - name: "NL"
     type: vless
-    server: YOUR_SERVER          # ← адрес VPN сервера (из ссылки, часть после @)
-    port: 443                    # ← порт (обычно 443)
-    uuid: YOUR_UUID              # ← UUID (из ссылки, часть до @)
+    server: nilsanderson.ohbah.com
+    port: 443
+    uuid: 66dc8983-dcb6-42a8-9ab0-410ecd5d378e
     network: tcp
     tls: true
     udp: true
-    servername: YOUR_SNI         # ← sni= из ссылки
+    servername: nilsanderson1.ohbah.com
     reality-opts:
-      public-key: YOUR_PUBLIC_KEY  # ← pbk= из ссылки
-      short-id: YOUR_SHORT_ID      # ← sid= из ссылки
+      public-key: XXGfXLEizI0sNzxqcHlrHSY1aHT4eT5iIuT8gbhstHc
+      short-id: 2aae935212624b57
     client-fingerprint: random
-    # interface-name не нужен — nikki изолирует mihomo через cgroup (нет routing loop)
+
+  - name: "DE"
+    type: vless
+    server: matrixx.website
+    port: 443
+    uuid: 24a07444-d8aa-458e-83f5-e117a8a61ff6
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    udp: true
+    servername: de.matrixx.website
+    reality-opts:
+      public-key: TmDkSWiSnA5sjiT3K67068bRtDr_iKP4sQcszj2BtW0
+      short-id: 9f3d0b27505c0af5
+    client-fingerprint: random
 
 proxy-groups:
   - name: "PROXY"
-    type: select
+    type: fallback
     proxies:
-      - "Мой VPN"
-      - DIRECT
+      - "NL"
+      - "DE"
+    url: "http://www.gstatic.com/generate_204"
+    interval: 60
+    tolerance: 50
 
 rules:
-  # VPN сервер — ПРЯМО (предотвращает routing loop!)
-  - DOMAIN,YOUR_SERVER,DIRECT
+  # VPN-серверы — прямо (предотвращает routing loop)
+  - DOMAIN,nilsanderson.ohbah.com,DIRECT
+  - DOMAIN,nilsanderson1.ohbah.com,DIRECT
+  - DOMAIN,matrixx.website,DIRECT
+  - DOMAIN,de.matrixx.website,DIRECT
 
-  # Captive portal detection — ПРЯМО (чтобы iOS/Android видели интернет!)
+  # Captive portal detection — прямо
   - DOMAIN,captive.apple.com,DIRECT
   - DOMAIN,connectivitycheck.gstatic.com,DIRECT
   - DOMAIN,clients3.google.com,DIRECT
@@ -175,14 +170,11 @@ rules:
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
 
-  # Россия напрямую (домены + IP)
-  # private = локальные/приватные домены
-  # tld-ru = все домены .ru/.рф
-  # category-ru = российские сервисы (VK, Mail.ru, Яндекс, RuTube и др.)
+  # Россия — прямо
   - GEOSITE,private,DIRECT
   - GEOSITE,tld-ru,DIRECT
   - GEOSITE,category-ru,DIRECT
   - GEOIP,RU,DIRECT
 
-  # Всё остальное — через VPN (YouTube, Instagram, TikTok и т.д.)
+  # Всё остальное — через VPN
   - MATCH,PROXY

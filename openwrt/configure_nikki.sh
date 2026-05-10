@@ -2,21 +2,23 @@
 # ============================================================
 #  Настройка nikki (luci-app-nikki) на OpenWrt
 #
-#  Что делает этот скрипт:
-#  1. Настраивает UCI опции nikki
-#  2. Настраивает dnsmasq для DNS через mihomo
-#  3. Создаёт /etc/firewall.user (MSS clamping)
-#  4. Включает UCI firewall include для /etc/firewall.user
-#  5. Копирует профиль и запускает nikki
+#  Что делает:
+#  1. Проверяет зависимости
+#  2. Настраивает UCI nikki (TUN gvisor, redirect, fake-ip-через-dnsmasq)
+#  3. Настраивает dnsmasq на форвард в mihomo (127.0.0.1#1053)
+#  4. Создаёт /etc/firewall.user (MSS clamping)
+#  5. Подключает include в UCI firewall
+#  6. Ставит watchdog + cron (автоперезапуск при сбое прокси)
+#  7. Запускает nikki
 #
-#  Требования: luci-app-nikki должен быть установлен
-#  Запуск: sh /tmp/configure_nikki.sh
+#  Требования: luci-app-nikki установлен (opkg install luci-app-nikki)
 # ============================================================
 
 set -e
 
 PROFILE_PATH="/etc/nikki/profiles/main.yaml"
 FIREWALL_USER="/etc/firewall.user"
+WATCHDOG_BIN="/usr/bin/nikki-watchdog"
 
 echo ""
 echo "========================================"
@@ -24,138 +26,161 @@ echo "  Настройка Nikki (Mihomo) на OpenWrt"
 echo "========================================"
 echo ""
 
-# ============================================================
-#  1. ПРОВЕРКА ЗАВИСИМОСТЕЙ
-# ============================================================
-echo "[1/5] Проверка зависимостей..."
-
-if [ ! -x /usr/bin/mihomo ] && [ ! -x /usr/libexec/nikki ]; then
-    echo ""
-    echo "ОШИБКА: nikki не установлен."
-    echo ""
-    echo "Установи luci-app-nikki:"
-    echo "  1. Через LuCI: System -> Software -> Search 'luci-app-nikki'"
-    echo "  2. Через SSH:  opkg update && opkg install luci-app-nikki"
-    echo ""
-    echo "После установки снова запусти этот скрипт."
-    exit 1
-fi
+# ------------------------------------------------------------
+#  1. Проверка зависимостей
+# ------------------------------------------------------------
+echo "[1/6] Проверка зависимостей..."
 
 if [ ! -d /etc/nikki ]; then
-    echo "ОШИБКА: директория /etc/nikki не найдена."
-    echo "Убедись что luci-app-nikki установлен корректно."
+    echo "ОШИБКА: /etc/nikki не найдена. Установи luci-app-nikki:"
+    echo "  opkg update && opkg install luci-app-nikki"
     exit 1
 fi
 
-echo "  OK: nikki установлен"
+if ! command -v curl >/dev/null 2>&1; then
+    echo "ОШИБКА: curl не установлен. Поставь: opkg install curl"
+    exit 1
+fi
 
-# ============================================================
-#  2. ПРОФИЛЬ
-# ============================================================
+echo "  OK: nikki установлен, curl доступен"
+
+# ------------------------------------------------------------
+#  2. Профиль
+# ------------------------------------------------------------
 echo ""
-echo "[2/5] Проверка профиля..."
+echo "[2/6] Проверка профиля..."
 
 mkdir -p /etc/nikki/profiles /etc/nikki/run/proxies
 
 if [ ! -f "$PROFILE_PATH" ]; then
-    echo "ОШИБКА: профиль не найден: $PROFILE_PATH"
-    echo "Скрипт deploy.ps1 должен загрузить профиль перед запуском этого скрипта."
+    echo "ОШИБКА: профиль $PROFILE_PATH не найден."
+    echo "deploy.ps1 должен был его загрузить раньше."
     exit 1
 fi
 
 echo "  OK: $PROFILE_PATH"
 
-# ============================================================
-#  3. UCI NIKKI — ключевые настройки
-# ============================================================
+# ------------------------------------------------------------
+#  3. UCI nikki
+# ------------------------------------------------------------
 echo ""
-echo "[3/5] Настройка UCI nikki..."
+echo "[3/6] Настройка UCI nikki..."
 
 # Основное
 uci set nikki.config.enabled='1'
 uci set nikki.config.profile='file:main.yaml'
 uci set nikki.config.test_profile='1'
 
-# TUN: gvisor обязательно (mixed ломает DNS hijack — баг #1258)
+# TUN: gvisor (mixed ломает DNS hijack — баг mihomo #1258)
 uci set nikki.mixin.tun_stack='gvisor'
-# DNS-hijack управляется из профиля (any:53), не через UCI nftables
+# tun_dns_hijack отключаем: dnsmasq сам форвардит на 127.0.0.1#1053 — для .lan
 uci set nikki.mixin.tun_dns_hijack='0'
 
 # TCP через redirect, UDP через TUN
 uci set nikki.proxy.tcp_mode='redirect'
 uci set nikki.proxy.udp_mode='tun'
-# DNS-hijack через nftables выключен: dnsmasq сам форвардит на 127.0.0.1#1053
-# Это нужно чтобы .lan домены продолжали работать через dnsmasq
 uci set nikki.proxy.ipv4_dns_hijack='0'
 uci set nikki.proxy.ipv6_dns_hijack='0'
-
-# 30 секунд достаточно — geodata грузится за 4-5 секунд
 uci set nikki.proxy.tun_timeout='30'
 
-# Geodata: автообновление раз в неделю (заменяет ручной cron)
-uci set nikki.mixin.geox_auto_update='1'
-uci set nikki.mixin.geox_update_interval='168'
-
-# Keepalive для iPhone (предотвращает разрыв соединений)
-uci set nikki.mixin.tcp_keep_alive_idle='600'
-uci set nikki.mixin.tcp_keep_alive_interval='15'
-
-# IPv6 выключен
+# IPv6 выкл
 uci set nikki.mixin.ipv6='0'
 
 uci commit nikki
-echo "  OK: UCI nikki настроен"
+echo "  OK"
 
-# ============================================================
-#  4. DNSMASQ → MIHOMO DNS
-# ============================================================
+# ------------------------------------------------------------
+#  4. dnsmasq → mihomo DNS
+# ------------------------------------------------------------
 echo ""
-echo "[4/5] Настройка dnsmasq..."
+echo "[4/6] Настройка dnsmasq..."
 
-# Форвардим весь DNS на mihomo (порт 1053, fake-ip)
-# Выключаем кеш — mihomo сам кеширует
-# Выключаем resolv.conf — nikki cgroup защищает mihomo от петли
 uci set dhcp.@dnsmasq[0].noresolv='1'
 uci set dhcp.@dnsmasq[0].cachesize='0'
 uci -q del dhcp.@dnsmasq[0].server 2>/dev/null || true
 uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#1053'
 uci commit dhcp
 /etc/init.d/dnsmasq restart 2>/dev/null || true
-echo "  OK: dnsmasq -> 127.0.0.1#1053 (fake-ip)"
+echo "  OK: dnsmasq -> 127.0.0.1#1053"
 
-# ============================================================
-#  5. FIREWALL: MSS CLAMPING
-# ============================================================
+# ------------------------------------------------------------
+#  5. Firewall: MSS clamping
+# ------------------------------------------------------------
 echo ""
-echo "[5/5] Настройка firewall (MSS clamping)..."
+echo "[5/6] Настройка firewall (MSS clamping)..."
 
-# MSS clamping — предотвращает проблемы с большими пакетами через VPN
-# Без этого могут не открываться некоторые сайты (PMTUD blackhole)
 cat > "$FIREWALL_USER" << 'EOF'
-# MSS clamping для VPN (предотвращает проблемы с большими пакетами)
-# Выполняется fw4 при каждом старте/перезагрузке firewall
+# MSS clamping для VPN (предотвращает PMTUD blackhole через TUN)
 nft add table inet mss_clamp 2>/dev/null || true
 nft add chain inet mss_clamp postrouting "{ type filter hook postrouting priority mangle; }" 2>/dev/null || true
 nft flush chain inet mss_clamp postrouting 2>/dev/null || true
 nft add rule inet mss_clamp postrouting "tcp flags syn tcp option maxseg size > 1452 tcp option maxseg size set 1452" 2>/dev/null || true
 EOF
 
-# UCI include: fw4 не выполняет /etc/firewall.user автоматически без него
 if ! uci show firewall 2>/dev/null | grep -q "path='/etc/firewall.user'"; then
     uci add firewall include > /dev/null
     uci set firewall.@include[-1].path="$FIREWALL_USER"
     uci set firewall.@include[-1].type='script'
     uci commit firewall
-    /etc/init.d/firewall reload 2>/dev/null || true
-    echo "  OK: /etc/firewall.user создан и добавлен в UCI firewall"
-else
-    /etc/init.d/firewall reload 2>/dev/null || true
-    echo "  OK: /etc/firewall.user (UCI include уже есть)"
+fi
+/etc/init.d/firewall reload 2>/dev/null || true
+echo "  OK"
+
+# ------------------------------------------------------------
+#  6. Watchdog + cron
+# ------------------------------------------------------------
+echo ""
+echo "[6/6] Установка watchdog (автоперезапуск при сбое)..."
+
+cat > "$WATCHDOG_BIN" << 'WD'
+#!/bin/sh
+# Nikki watchdog: проверяет работоспособность mihomo, рестартит при сбое.
+# Запускается раз в 5 минут через cron. Рестарт после 3 подряд провалов.
+
+STATE=/tmp/nikki-watchdog.state
+LOG=/var/log/nikki/watchdog.log
+THRESHOLD=3
+
+mkdir -p "$(dirname "$LOG")"
+
+check_alive() {
+    service nikki status 2>/dev/null | grep -q running || return 1
+    pgrep mihomo >/dev/null || return 2
+    curl -s -m 5 "http://127.0.0.1:9090/proxies/PROXY" 2>/dev/null \
+        | grep -q '"alive":true' || return 3
+    return 0
+}
+
+if check_alive; then
+    rm -f "$STATE"
+    exit 0
 fi
 
-# ============================================================
-#  ЗАПУСК NIKKI
-# ============================================================
+REASON=$?
+FAILS=$(cat "$STATE" 2>/dev/null || echo 0)
+FAILS=$((FAILS + 1))
+echo "$FAILS" > "$STATE"
+
+NOW=$(date '+%Y-%m-%d %H:%M:%S')
+echo "$NOW [WARN] check failed (reason=$REASON, consecutive=$FAILS)" >> "$LOG"
+
+if [ "$FAILS" -ge "$THRESHOLD" ]; then
+    echo "$NOW [ACTION] threshold reached, restarting nikki" >> "$LOG"
+    service nikki restart >> "$LOG" 2>&1
+    rm -f "$STATE"
+fi
+WD
+chmod +x "$WATCHDOG_BIN"
+
+# Cron: чистим старую запись, добавляем новую
+( crontab -l 2>/dev/null | grep -v 'nikki-watchdog'; echo "*/5 * * * * $WATCHDOG_BIN" ) | crontab -
+/etc/init.d/cron enable 2>/dev/null || true
+/etc/init.d/cron restart 2>/dev/null || true
+echo "  OK: $WATCHDOG_BIN, cron */5 минут"
+
+# ------------------------------------------------------------
+#  Запуск nikki
+# ------------------------------------------------------------
 echo ""
 echo "  Запускаем nikki..."
 /etc/init.d/nikki enable 2>/dev/null || true
@@ -163,11 +188,11 @@ echo "  Запускаем nikki..."
 
 echo ""
 echo "========================================"
-echo "  Nikki настроен и запущен!"
+echo "  Готово!"
 echo "========================================"
 echo ""
-echo "  Веб-панель: http://192.168.1.1:9090/ui"
-echo "  Проверить статус: service nikki status"
-echo "  Логи:  cat /var/log/nikki/app.log"
-echo "         cat /var/log/nikki/core.log"
+echo "  Веб-панель:  http://192.168.1.1:9090/ui"
+echo "  Статус:      service nikki status"
+echo "  Логи:        cat /var/log/nikki/app.log"
+echo "  Watchdog:    cat /var/log/nikki/watchdog.log"
 echo ""

@@ -228,6 +228,22 @@ service nikki restart
    tail /var/log/nikki/watchdog.log
    ```
 
+### "Health-check OK но реальный трафик timeout-ит"
+Симптом: в веб-панели прокси `alive: true`, ping/handshake к серверу проходят, а сайты грузятся 5-10 секунд и падают по таймауту. Через 30 минут — само работает.
+
+Это **["16-килобайтная штора"](https://github.com/net4people/bbs/issues/490)** — российский метод DPI-блокировки, который пропускает мелкие пакеты (<1KB) и замораживает соединение когда суммарно прокачано >16KB. Расширяется на datacenter-CIDR с июня 2025, эскалирован 15 апреля 2026.
+
+**Никаким mihomo-конфигом это не лечится** — блокировка работает на уровне ISP до VPS. Лечится только сменой транспорта:
+- **WebSocket+TLS через Cloudflare CDN** — CF CIDR частично whitelisted у TSPU
+- **NaiveProxy** (HTTP/2 CONNECT) — другая DPI-сигнатура
+- **Shadowsocks-2022** на uncommon порту
+- **Cloudflare WARP / Argo Tunnel** как фронт перед VPS
+
+Запроси у провайдера VLESS+WebSocket+TLS на CF-проксированном домене или возьми второго провайдера с другим транспортом.
+
+### `flow: xtls-rprx-vision` — добавлять или нет?
+Зависит от **серверной** конфигурации. Если в твоей `vless://` ссылке есть `flow=xtls-rprx-vision` — добавляй в профиль. Если нет — НЕ добавляй: сервер не примет, прокси будет в `alive: false`. На разных серверах одного провайдера может быть по-разному (проверено на NL/DE — у нас NL без flow, DE с flow).
+
 ### iPhone/Android пишет "Нет интернета"
 Это captive portal detection. Профиль уже содержит правила для `captive.apple.com` и `connectivitycheck.gstatic.com` — должно работать. Если ошибка постоянная: `service nikki restart`.
 

@@ -4,8 +4,7 @@
 # ============================================================
 #
 #  Чтобы добавить/заменить прокси — отредактируй секцию `proxies:`
-#  ниже (~строки 110-145). Имена в `proxy-groups → fallback` должны
-#  совпадать с именами в `proxies`.
+#  ниже. Имена в `proxy-groups` должны совпадать с именами в `proxies`.
 #
 # ============================================================
 
@@ -18,6 +17,19 @@ mode: rule
 log-level: info
 ipv6: false
 
+# Параллельный dial всех IP-адресов сервера (mihomo dialer optimization).
+# Помогает когда DNS вернул несколько IP и часть из них блэкхольнутые.
+tcp-concurrent: true
+
+# Unified delay — measure RTT минус handshake = более честная latency
+# для url-test/fallback decisions.
+unified-delay: true
+
+# Keep-alive — препятствует stale NAT соединений (одна из причин 30-мин
+# "само заработало" симптомов через VPN).
+keep-alive-idle: 600
+keep-alive-interval: 15
+
 profile:
   store-fake-ip: true
 
@@ -26,8 +38,7 @@ external-controller: 0.0.0.0:9090
 external-ui: /etc/mihomo/ui
 secret: ""
 
-# Geo базы: автообновление (раз в 7 дней). Прописано в профиле, не в UCI nikki —
-# не зависит от схемы UCI и работает на любой версии luci-app-nikki.
+# Geo базы: автообновление раз в 7 дней. Прописано в профиле — портабельно.
 geodata-mode: false
 geo-auto-update: true
 geo-update-interval: 168
@@ -106,8 +117,7 @@ dns:
     - https://dns.cloudflare.com/dns-query
 
 # ============================================================
-#  Прокси: NL основной, DE резервный (fallback автоматически
-#  переключится при отказе одного из серверов)
+#  Прокси: NL основной, DE резервный
 # ============================================================
 proxies:
   - name: "NL"
@@ -115,14 +125,16 @@ proxies:
     server: nilsanderson.ohbah.com
     port: 443
     uuid: 66dc8983-dcb6-42a8-9ab0-410ecd5d378e
+    # flow: xtls-rprx-vision сервером не принимается (проверено 2026-05-10:
+    # 6/6 health-check fail). Если провайдер починит сервер — добавить.
     network: tcp
     tls: true
     udp: true
+    client-fingerprint: chrome
     servername: nilsanderson1.ohbah.com
     reality-opts:
       public-key: XXGfXLEizI0sNzxqcHlrHSY1aHT4eT5iIuT8gbhstHc
       short-id: 2aae935212624b57
-    client-fingerprint: random
 
   - name: "DE"
     type: vless
@@ -133,25 +145,43 @@ proxies:
     network: tcp
     tls: true
     udp: true
+    client-fingerprint: chrome
     servername: de.matrixx.website
     reality-opts:
       public-key: TmDkSWiSnA5sjiT3K67068bRtDr_iKP4sQcszj2BtW0
       short-id: 9f3d0b27505c0af5
-    client-fingerprint: random
 
+# ============================================================
+#  Группы:
+#  - PROXY (select) — manual override; в веб-панели можно выбрать
+#    AUTO/NL/DE/DIRECT когда что-то странное.
+#  - AUTO (fallback) — sticky выбор: пробует NL, если умер — DE.
+#    expected-status:204 ловит captive-portal интерсепты,
+#    max-failed-times:3 переключает быстрее (default 5).
+# ============================================================
 proxy-groups:
   - name: "PROXY"
-    # url-test выбирает прокси с лучшим delay автоматически и реактивнее
-    # fallback'а: тестирует ВСЕ прокси на каждом интервале, мгновенно
-    # переключается когда активный fail-ит. tolerance даёт NL приоритет
-    # пока он не сильно медленнее DE — пользователь предпочитает NL.
-    type: url-test
+    type: select
+    proxies:
+      - "AUTO"
+      - "NL"
+      - "DE"
+      - "DIRECT"
+
+  - name: "AUTO"
+    type: fallback
     proxies:
       - "NL"
       - "DE"
-    url: "http://www.gstatic.com/generate_204"
+    # HTTPS health-check — проходит через TLS data-plane (HTTP 204
+    # не проходит full data-plane test). Если сервер зафризил соединение
+    # на >TCP-handshake — health-check тоже упадёт.
+    url: "https://www.gstatic.com/generate_204"
+    expected-status: 204
     interval: 180
-    tolerance: 150
+    timeout: 5000
+    max-failed-times: 3
+    lazy: false
 
 rules:
   # VPN-серверы — прямо (предотвращает routing loop)
@@ -180,5 +210,5 @@ rules:
   - GEOSITE,category-ru,DIRECT
   - GEOIP,RU,DIRECT
 
-  # Всё остальное — через VPN
+  # Всё остальное — через VPN (PROXY → AUTO → NL/DE)
   - MATCH,PROXY

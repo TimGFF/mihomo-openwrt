@@ -121,9 +121,15 @@ if ! uci show firewall 2>/dev/null | grep -q "path='/etc/firewall.user'"; then
     uci add firewall include > /dev/null
     uci set firewall.@include[-1].path="$FIREWALL_USER"
     uci set firewall.@include[-1].type='script'
+    # fw4 (OpenWrt 22.03+) игнорирует include без явного fw4_compatible=1
+    uci set firewall.@include[-1].fw4_compatible='1'
     uci commit firewall
+else
+    # Существующий include: убедимся что fw4_compatible выставлен
+    INC=$(uci show firewall | awk -F'[.=]' "/path='\/etc\/firewall.user'/{print \$2; exit}")
+    [ -n "$INC" ] && uci set firewall.${INC}.fw4_compatible='1' && uci commit firewall
 fi
-/etc/init.d/firewall reload 2>/dev/null || true
+/etc/init.d/firewall restart 2>/dev/null || true
 echo "  OK"
 
 # ------------------------------------------------------------

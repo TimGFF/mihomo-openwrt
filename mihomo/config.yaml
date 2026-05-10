@@ -141,13 +141,17 @@ proxies:
 
 proxy-groups:
   - name: "PROXY"
-    type: fallback
+    # url-test выбирает прокси с лучшим delay автоматически и реактивнее
+    # fallback'а: тестирует ВСЕ прокси на каждом интервале, мгновенно
+    # переключается когда активный fail-ит. tolerance даёт NL приоритет
+    # пока он не сильно медленнее DE — пользователь предпочитает NL.
+    type: url-test
     proxies:
       - "NL"
       - "DE"
     url: "http://www.gstatic.com/generate_204"
-    interval: 60
-    tolerance: 50
+    interval: 180
+    tolerance: 150
 
 rules:
   # VPN-серверы — прямо (предотвращает routing loop)

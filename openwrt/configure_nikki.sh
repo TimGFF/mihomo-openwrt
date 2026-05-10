@@ -71,6 +71,11 @@ uci set nikki.config.enabled='1'
 uci set nikki.config.profile='file:main.yaml'
 uci set nikki.config.test_profile='1'
 
+# Запланированный рестарт раз в сутки в 04:00 — лечит slow-leak в gvisor TUN
+# (mihomo #1782) и обновляет fake-ip кеш. Незаметен пользователю (300мс простой).
+uci set nikki.config.scheduled_restart='1'
+uci set nikki.config.scheduled_restart_cron='0 4 * * *'
+
 # TUN: gvisor (mixed ломает DNS hijack — баг mihomo #1258)
 uci set nikki.mixin.tun_stack='gvisor'
 # tun_dns_hijack отключаем: dnsmasq сам форвардит на 127.0.0.1#1053 — для .lan
@@ -142,18 +147,32 @@ cat > "$WATCHDOG_BIN" << 'WD'
 #!/bin/sh
 # Nikki watchdog: проверяет работоспособность mihomo, рестартит при сбое.
 # Запускается раз в 5 минут через cron. Рестарт после 3 подряд провалов.
+#
+# Проверяемые признаки сбоя (в порядке частоты):
+#   reason=1: сервис nikki не running
+#   reason=2: процесс mihomo не запущен
+#   reason=3: PROXY группа не alive через mihomo API
+#   reason=4: nft table inet nikki пропала (баг openwrt #11620: fw4 stop
+#             сбрасывает все nft таблицы; при этом nikki не всегда сама
+#             поднимает свою обратно)
+#   reason=5: mihomo жрёт > 200 МБ (баг mihomo #1782: gvisor slow leak)
 
 STATE=/tmp/nikki-watchdog.state
 LOG=/var/log/nikki/watchdog.log
 THRESHOLD=3
+MEM_LIMIT_KB=204800   # 200 MB
 
 mkdir -p "$(dirname "$LOG")"
 
+REASON=0
 check_alive() {
-    service nikki status 2>/dev/null | grep -q running || return 1
-    pgrep mihomo >/dev/null || return 2
+    service nikki status 2>/dev/null | grep -q running || { REASON=1; return 1; }
+    pgrep mihomo >/dev/null || { REASON=2; return 1; }
     curl -s -m 5 "http://127.0.0.1:9090/proxies/PROXY" 2>/dev/null \
-        | grep -q '"alive":true' || return 3
+        | grep -q '"alive":true' || { REASON=3; return 1; }
+    nft list table inet nikki >/dev/null 2>&1 || { REASON=4; return 1; }
+    RSS=$(awk '/VmRSS:/{print $2}' /proc/$(pgrep mihomo)/status 2>/dev/null || echo 0)
+    [ "$RSS" -lt "$MEM_LIMIT_KB" ] || { REASON=5; return 1; }
     return 0
 }
 
@@ -162,7 +181,6 @@ if check_alive; then
     exit 0
 fi
 
-REASON=$?
 FAILS=$(cat "$STATE" 2>/dev/null || echo 0)
 FAILS=$((FAILS + 1))
 echo "$FAILS" > "$STATE"
@@ -171,7 +189,7 @@ NOW=$(date '+%Y-%m-%d %H:%M:%S')
 echo "$NOW [WARN] check failed (reason=$REASON, consecutive=$FAILS)" >> "$LOG"
 
 if [ "$FAILS" -ge "$THRESHOLD" ]; then
-    echo "$NOW [ACTION] threshold reached, restarting nikki" >> "$LOG"
+    echo "$NOW [ACTION] threshold reached (last reason=$REASON), restarting nikki" >> "$LOG"
     service nikki restart >> "$LOG" 2>&1
     rm -f "$STATE"
 fi

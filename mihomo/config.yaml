@@ -108,6 +108,7 @@ dns:
     - "nilsanderson1.ohbah.com"
     - "matrixx.website"
     - "de.matrixx.website"
+    - "aastorage.app"
 
   default-nameserver:
     - 8.8.8.8
@@ -151,28 +152,43 @@ proxies:
       public-key: TmDkSWiSnA5sjiT3K67068bRtDr_iKP4sQcszj2BtW0
       short-id: 9f3d0b27505c0af5
 
+  - name: "PL"
+    type: vless
+    server: aastorage.app
+    port: 443
+    uuid: d0460393-1e5a-426b-8c89-d89a48124675
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    udp: true
+    client-fingerprint: chrome
+    servername: aastorage.app
+    reality-opts:
+      public-key: HETPD1if6rkjfll1IrPyHP5JPtmB1tSBUFZCqDi5VFU
+      short-id: 32c8dcb84e602cba
+
 # ============================================================
 #  Группы:
 #  - PROXY (select) — manual override; в веб-панели можно выбрать
-#    AUTO/NL/DE/DIRECT когда что-то странное.
-#  - AUTO (fallback) — sticky выбор: пробует NL, если умер — DE.
-#    expected-status:204 ловит captive-portal интерсепты,
-#    max-failed-times:3 переключает быстрее (default 5).
+#    AUTO/DE/NL/PL/DIRECT когда что-то странное.
+#  - AUTO (fallback) — sticky выбор: DE → NL → PL.
 # ============================================================
 proxy-groups:
   - name: "PROXY"
     type: select
     proxies:
       - "AUTO"
-      - "NL"
       - "DE"
+      - "NL"
+      - "PL"
       - "DIRECT"
 
   - name: "AUTO"
     type: fallback
     proxies:
-      - "NL"
       - "DE"
+      - "NL"
+      - "PL"
     # HTTPS health-check — проходит через TLS data-plane (HTTP 204
     # не проходит full data-plane test). Если сервер зафризил соединение
     # на >TCP-handshake — health-check тоже упадёт.
@@ -189,6 +205,7 @@ rules:
   - DOMAIN,nilsanderson1.ohbah.com,DIRECT
   - DOMAIN,matrixx.website,DIRECT
   - DOMAIN,de.matrixx.website,DIRECT
+  - DOMAIN,aastorage.app,DIRECT
 
   # Captive portal detection — прямо
   - DOMAIN,captive.apple.com,DIRECT

@@ -125,9 +125,8 @@ proxies:
     type: vless
     server: nilsanderson.ohbah.com
     port: 443
-    uuid: 66dc8983-dcb6-42a8-9ab0-410ecd5d378e
-    # flow: xtls-rprx-vision сервером не принимается (проверено 2026-05-10:
-    # 6/6 health-check fail). Если провайдер починит сервер — добавить.
+    uuid: 4361d968-c31c-4ded-8566-c6e6f376797b
+    flow: xtls-rprx-vision
     network: tcp
     tls: true
     udp: true

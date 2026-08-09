@@ -33,12 +33,13 @@ echo "[1/6] Проверка зависимостей..."
 
 if [ ! -d /etc/nikki ]; then
     echo "ОШИБКА: /etc/nikki не найдена. Установи luci-app-nikki:"
-    echo "  opkg update && opkg install luci-app-nikki"
+    echo "  apk update && apk add luci-app-nikki       # OpenWrt 25.12+"
+    echo "  opkg update && opkg install luci-app-nikki # OpenWrt 24.10"
     exit 1
 fi
 
 if ! command -v curl >/dev/null 2>&1; then
-    echo "ОШИБКА: curl не установлен. Поставь: opkg install curl"
+    echo "ОШИБКА: curl не установлен. Поставь: apk add curl (или opkg install curl)"
     exit 1
 fi
 
@@ -69,7 +70,12 @@ echo "[3/6] Настройка UCI nikki..."
 # Основное
 uci set nikki.config.enabled='1'
 uci set nikki.config.profile='file:main.yaml'
-uci set nikki.config.test_profile='1'
+# test_profile=0 намеренно. При restart procd останавливает старый mihomo
+# асинхронно, а тест (`mihomo -d ... -t`) стартует вторым экземпляром внутри
+# start_service() — на 240 МБ ОЗУ это OOM. Замерено: с тестом падал 1 рестарт
+# из 2, без него 0 из 4. Отката тест всё равно не даёт: старый процесс уже
+# остановлен, и плохой конфиг положит сеть в обоих случаях.
+uci set nikki.config.test_profile='0'
 
 # Запланированный рестарт раз в сутки в 04:00 — лечит slow-leak в gvisor TUN
 # (mihomo #1782) и обновляет fake-ip кеш. Незаметен пользователю (300мс простой).
@@ -171,7 +177,11 @@ check_alive() {
     curl -s -m 5 "http://127.0.0.1:9090/proxies/PROXY" 2>/dev/null \
         | grep -q '"alive":true' || { REASON=3; return 1; }
     nft list table inet nikki >/dev/null 2>&1 || { REASON=4; return 1; }
-    RSS=$(awk '/VmRSS:/{print $2}' /proc/$(pgrep mihomo)/status 2>/dev/null || echo 0)
+    # pgrep может вернуть несколько PID — берём первый, иначе путь ломается
+    # и пустой RSS давал ложное срабатывание по памяти.
+    MPID=$(pgrep mihomo | head -n 1)
+    RSS=$(awk '/VmRSS:/{print $2}' "/proc/$MPID/status" 2>/dev/null)
+    [ -z "$RSS" ] && RSS=0
     [ "$RSS" -lt "$MEM_LIMIT_KB" ] || { REASON=5; return 1; }
     return 0
 }

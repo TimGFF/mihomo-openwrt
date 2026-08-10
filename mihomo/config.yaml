@@ -38,10 +38,12 @@ external-controller: 0.0.0.0:9090
 external-ui: /etc/mihomo/ui
 secret: ""
 
-# Geo базы: автообновление раз в 7 дней. Прописано в профиле — портабельно.
+# Geo базы: автообновление раз в сутки. Прописано в профиле — портабельно.
+# Внимание: nikki перекрывает это значение своим UCI-полем
+# `nikki.mixin.geox_update_interval`, так что менять надо и там тоже.
 geodata-mode: false
 geo-auto-update: true
-geo-update-interval: 168
+geo-update-interval: 24
 geox-url:
   geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
   geosite: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
@@ -104,107 +106,212 @@ dns:
     - "connectivitycheck.gstatic.com"
     - "clients3.google.com"
     # VPN серверы — реальный IP (иначе routing loop!)
-    - "nilsanderson.ohbah.com"
-    - "nilsanderson1.ohbah.com"
-    - "matrixx.website"
-    - "de.matrixx.website"
-    - "aastorage.app"
+    - "YOUR_SERVER_NL"
+    - "YOUR_SERVER_DE"
+    - "YOUR_SERVER_PL"
+    - "YOUR_SERVER_TR"
+    - "YOUR_SERVER_RU"
+    - "YOUR_SERVER_US"
+    - "YOUR_SERVER_RUPH"
 
+  # Бутстрап резолверов. По UDP/53 к Google/Cloudflare в РФ ходить нельзя
+  # (режет ТСПУ) — поэтому все резолверы ниже заданы ПО IP, и бутстрап
+  # фактически не используется. Yandex первым как единственный рабочий UDP.
   default-nameserver:
-    - 8.8.8.8
-    - 1.1.1.1
+    - 77.88.8.8
+    - 77.88.8.1
+
+  # Основной резолвер: DoH по IP-адресу, БЕЗ имени хоста.
+  # Именно из-за `https://dns.google/...` и `https://dns.cloudflare.com/...`
+  # весь DIRECT-резолв ложился: mihomo не мог отрезолвить сами эти имена.
+  # IP-форма исключает бутстрап; DoH-шифрование исключает подмену ответов.
   nameserver:
-    - https://dns.google/dns-query
-    - https://dns.cloudflare.com/dns-query
+    - https://8.8.8.8/dns-query
+    - https://1.1.1.1/dns-query
+
+  # Резолв доменов VPN-серверов — только напрямую, мимо туннеля (иначе петля).
+  proxy-server-nameserver:
+    - https://8.8.8.8/dns-query
+    - https://1.1.1.1/dns-query
+
+  # Российские домены — быстрый локальный резолвер. Отдельной политикой,
+  # чтобы Yandex DNS не отвечал на запросы про заблокированные сайты
+  # (подменённый ответ увёл бы их в DIRECT по правилу GEOIP,RU).
+  nameserver-policy:
+    "geosite:tld-ru,category-ru,private":
+      - 77.88.8.8
+      - 77.88.8.1
+      - https://8.8.8.8/dns-query
+
+  # Примечание: mihomo при старте всегда грузит китайскую базу geosite `cn`
+  # (~3.5 с) — это зашито в ядро и через fallback-filter не отключается
+  # (проверено: с `geosite: []` она грузится точно так же). На маршрутизацию
+  # не влияет — правила используют только tld-ru/category-ru/private/GEOIP,RU.
 
 # ============================================================
-#  Прокси: NL основной, DE резервный
+#  Прокси: все серверы провайдера (один UUID/pbk/sid на всех)
 # ============================================================
 proxies:
   - name: "NL"
     type: vless
-    server: nilsanderson.ohbah.com
+    server: YOUR_SERVER_NL
     port: 443
-    uuid: 4361d968-c31c-4ded-8566-c6e6f376797b
+    uuid: YOUR_UUID
     flow: xtls-rprx-vision
     network: tcp
     tls: true
     udp: true
     client-fingerprint: chrome
-    servername: nilsanderson1.ohbah.com
+    servername: YOUR_SERVER_NL
     reality-opts:
-      public-key: XXGfXLEizI0sNzxqcHlrHSY1aHT4eT5iIuT8gbhstHc
-      short-id: 2aae935212624b57
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
 
   - name: "DE"
     type: vless
-    server: matrixx.website
+    server: YOUR_SERVER_DE
     port: 443
-    uuid: 24a07444-d8aa-458e-83f5-e117a8a61ff6
+    uuid: YOUR_UUID
     flow: xtls-rprx-vision
     network: tcp
     tls: true
     udp: true
     client-fingerprint: chrome
-    servername: de.matrixx.website
+    servername: YOUR_SERVER_DE
     reality-opts:
-      public-key: TmDkSWiSnA5sjiT3K67068bRtDr_iKP4sQcszj2BtW0
-      short-id: 9f3d0b27505c0af5
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
 
   - name: "PL"
     type: vless
-    server: aastorage.app
+    server: YOUR_SERVER_PL
     port: 443
-    uuid: d0460393-1e5a-426b-8c89-d89a48124675
+    uuid: YOUR_UUID
     flow: xtls-rprx-vision
     network: tcp
     tls: true
     udp: true
     client-fingerprint: chrome
-    servername: aastorage.app
+    servername: YOUR_SERVER_PL
     reality-opts:
-      public-key: HETPD1if6rkjfll1IrPyHP5JPtmB1tSBUFZCqDi5VFU
-      short-id: 32c8dcb84e602cba
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
+
+  - name: "TR"
+    type: vless
+    server: YOUR_SERVER_TR
+    port: 443
+    uuid: YOUR_UUID
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    udp: true
+    client-fingerprint: chrome
+    servername: YOUR_SERVER_TR
+    reality-opts:
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
+
+  - name: "US"
+    type: vless
+    server: YOUR_SERVER_US
+    port: 443
+    uuid: YOUR_UUID
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    udp: true
+    client-fingerprint: chrome
+    servername: YOUR_SERVER_US
+    reality-opts:
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
+
+  # Российские точки входа. В AUTO не входят: выход в РФ не разблокирует
+  # YouTube/Instagram. Держим для ручного выбора в панели.
+  - name: "RU"
+    type: vless
+    server: YOUR_SERVER_RU
+    port: 443
+    uuid: YOUR_UUID
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    udp: true
+    client-fingerprint: chrome
+    servername: YOUR_SERVER_RU
+    reality-opts:
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
+
+  - name: "RU-PH"
+    type: vless
+    server: YOUR_SERVER_RUPH
+    port: 443
+    uuid: YOUR_UUID
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    udp: true
+    client-fingerprint: chrome
+    servername: YOUR_SERVER_RUPH
+    reality-opts:
+      public-key: YOUR_PUBLIC_KEY
+      short-id: YOUR_SHORT_ID
 
 # ============================================================
 #  Группы:
 #  - PROXY (select) — manual override; в веб-панели можно выбрать
-#    AUTO/DE/NL/PL/DIRECT когда что-то странное.
-#  - AUTO (fallback) — sticky выбор: DE → NL → PL.
+#    AUTO/любую страну/DIRECT когда что-то странное.
+#  - AUTO (fallback) — sticky выбор по порядку: PL → NL → DE → TR → US.
+#    PL первым: единственный проверенно живой на момент настройки.
 # ============================================================
 proxy-groups:
   - name: "PROXY"
     type: select
     proxies:
       - "AUTO"
-      - "DE"
-      - "NL"
       - "PL"
+      - "NL"
+      - "DE"
+      - "TR"
+      - "US"
+      - "RU"
+      - "RU-PH"
       - "DIRECT"
 
+  # url-test вместо fallback: каждые 3 минуты замеряет задержку всех
+  # серверов и сам ставит первым самый быстрый по пингу. Мёртвые
+  # исключаются автоматически. tolerance 50мс — чтобы не скакал между
+  # серверами с почти одинаковым пингом.
   - name: "AUTO"
-    type: fallback
+    type: url-test
     proxies:
-      - "DE"
-      - "NL"
       - "PL"
+      - "NL"
+      - "DE"
+      - "TR"
+      - "US"
     # HTTPS health-check — проходит через TLS data-plane (HTTP 204
     # не проходит full data-plane test). Если сервер зафризил соединение
     # на >TCP-handshake — health-check тоже упадёт.
     url: "https://www.gstatic.com/generate_204"
     expected-status: 204
     interval: 180
+    tolerance: 50
     timeout: 5000
     max-failed-times: 3
     lazy: false
 
 rules:
   # VPN-серверы — прямо (предотвращает routing loop)
-  - DOMAIN,nilsanderson.ohbah.com,DIRECT
-  - DOMAIN,nilsanderson1.ohbah.com,DIRECT
-  - DOMAIN,matrixx.website,DIRECT
-  - DOMAIN,de.matrixx.website,DIRECT
-  - DOMAIN,aastorage.app,DIRECT
+  - DOMAIN,YOUR_SERVER_NL,DIRECT
+  - DOMAIN,YOUR_SERVER_DE,DIRECT
+  - DOMAIN,YOUR_SERVER_PL,DIRECT
+  - DOMAIN,YOUR_SERVER_TR,DIRECT
+  - DOMAIN,YOUR_SERVER_RU,DIRECT
+  - DOMAIN,YOUR_SERVER_US,DIRECT
+  - DOMAIN,YOUR_SERVER_RUPH,DIRECT
 
   # Captive portal detection — прямо
   - DOMAIN,captive.apple.com,DIRECT
@@ -226,5 +333,5 @@ rules:
   - GEOSITE,category-ru,DIRECT
   - GEOIP,RU,DIRECT
 
-  # Всё остальное — через VPN (PROXY → AUTO → NL/DE)
+  # Всё остальное — через VPN (PROXY → AUTO → PL/NL/DE/TR/US)
   - MATCH,PROXY

@@ -86,8 +86,8 @@ dns:
     - "localhost.localdomain"
     # NTP — обязательно реальный IP
     - "+.pool.ntp.org"
-    - "time.+*"
-    - "ntp.+*"
+    - "time.*"
+    - "ntp.*"
     - "time.*.com"
     - "ntp.*.com"
     - "time.windows.com"
@@ -95,7 +95,7 @@ dns:
     - "time.apple.com"
     # STUN / WebRTC
     - "+.stun.*.*"
-    - "stun.+*"
+    - "stun.*.*"
     # Windows captive
     - "+.msftncsi.com"
     - "+.msftconnecttest.com"

@@ -22,7 +22,13 @@
 # ============================================================
 
 LOG=/root/router-updates.log
-BACKUP=/root/backup-pre-update.tar.gz
+BACKUP=/tmp/backup-pre-update.tar.gz   # /tmp = RAM: бэкап нужен только
+                                       # на время этого запуска, а на flash
+                                       # его 7 МБ стоили роутеру места, из-за
+                                       # которого 18.08.2026 сорвался откат ядра.
+                                       # Долгоживущие копии снимай снаружи:
+                                       # ssh root@router 'sysupgrade -b /tmp/b.tar.gz
+                                       # >/dev/null && cat /tmp/b.tar.gz; rm -f /tmp/b.tar.gz'
 MIN_FREE_KB=10240          # не обновляться, если на overlay меньше 10 МБ
 ALLOW='^(luci|ca-bundle|owut)'
 
